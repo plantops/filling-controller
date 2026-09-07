@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -11,8 +12,7 @@ from .config import load_config
 from .runtime import Runtime
 from .storage import Recorder
 
-ROOT = Path(__file__).resolve().parents[2]
-PROFILE = ROOT / "spec" / "profiles" / "haver-rotary-pilot-sp01.yaml"
+PROFILE = Path(os.environ.get("FILLING_PROFILE", "spec/profiles/haver-rotary-pilot-sp01.yaml")).resolve()
 STATIC = Path(__file__).resolve().parent / "static"
 
 config = load_config(PROFILE)
@@ -100,4 +100,5 @@ async def live(ws: WebSocket):
 
 def main() -> None:
     import uvicorn
+
     uvicorn.run("filling_controller.api:app", host="0.0.0.0", port=8000, reload=False)
