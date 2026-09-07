@@ -1,10 +1,198 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SP01 Filling Controller</title>
-<style>:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#17202a;background:#eef1f4}*{box-sizing:border-box}body{margin:0}.top{height:58px;background:#111820;color:#fff;display:flex;align-items:center;gap:24px;padding:0 22px}.top b{font-size:17px}.badge{padding:5px 10px;border:1px solid #65717e;border-radius:4px;font-size:12px}.grid{display:grid;grid-template-columns:240px 1fr 280px;gap:12px;padding:12px}.card{background:#fff;border:1px solid #d4d9de;border-radius:6px;padding:14px}.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#69747f}.state{font-size:20px;font-weight:700}.mimic{height:330px;display:flex;align-items:center;justify-content:center}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.metric{border:1px solid #e0e4e8;padding:10px}.metric strong{display:block;font-size:18px;margin-top:4px}.wide{grid-column:1/-1}.chart{height:260px}.buttons{display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid #8a949e;background:#fff;padding:8px 12px;border-radius:4px;cursor:pointer}button.primary{background:#17202a;color:white}.signal{display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 0;border-bottom:1px solid #edf0f2;font-size:13px}.source{font-size:10px;border:1px solid #bbc3ca;padding:2px 5px;border-radius:3px}table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;border-bottom:1px solid #e5e8eb;padding:7px}@media(max-width:1000px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}</style></head>
-<body><div class="top"><b>FILLING CONTROLLER / SP01</b><span class="badge">SIM</span><span id="run" class="badge">STOPPED</span><span>Cycle <b id="cycle">1</b></span><span style="margin-left:auto" id="clock">0.00 s</span></div><div class="grid">
-<section class="card"><div class="label">Controller state</div><div id="state" class="state">IDLE</div><div style="height:14px"></div><div class="label">Run control</div><div class="buttons" style="margin-top:8px"><button class="primary" onclick="cmd('start')">Start</button><button onclick="cmd('stop')">Stop</button><button onclick="cmd('reset')">Reset</button></div><div style="height:20px"></div><div class="label">Signals</div><div id="signals"></div></section>
-<section class="card"><div class="label">Virtual filling unit</div><div class="mimic"><svg viewBox="0 0 500 320" width="100%" height="100%"><rect x="150" y="20" width="200" height="70" rx="5" fill="#d9dde1" stroke="#606b75"/><text x="250" y="58" text-anchor="middle">PRODUCT HOPPER</text><rect id="gate" x="220" y="95" width="60" height="18" fill="#8c969f"/><path id="flow" d="M250 114 L230 210 L270 210 Z" fill="#c3a46a" opacity="0.25"/><rect x="186" y="212" width="128" height="82" rx="8" fill="#f7f8f9" stroke="#66717b" stroke-width="2"/><text x="250" y="248" text-anchor="middle" font-size="13">BAG</text><text id="bagWeight" x="250" y="276" text-anchor="middle" font-size="24" font-weight="700">0.000 kg</text></svg></div><div class="metrics"><div class="metric"><span class="label">Raw</span><strong id="raw">0</strong></div><div class="metric"><span class="label">Filtered</span><strong id="filtered">0</strong></div><div class="metric"><span class="label">Projected</span><strong id="projected">0</strong></div><div class="metric"><span class="label">Fill rate</span><strong id="rate">0</strong></div></div></section>
-<section class="card"><div class="label">Plant truth / diagnostics</div><div class="signal"><span>True mass</span><b id="trueMass">0</b></div><div class="signal"><span>Gate command</span><b id="gateCmd">0%</b></div><div class="signal"><span>Gate actual</span><b id="gateActual">0%</b></div><div class="signal"><span>Flow at gate</span><b id="flowGate">0</b></div><div class="signal"><span>Flow into bag</span><b id="flowBag">0</b></div><div class="signal"><span>Weight stable</span><b id="stable">NO</b></div><div style="height:18px"></div><div class="label">Commands</div><div id="commands"></div></section>
-<section class="card wide chart"><div class="label">Weight trace — filtered / projected / target</div><svg viewBox="0 0 1200 220" width="100%" height="220"><line x1="45" y1="15" x2="45" y2="195" stroke="#9ba4ac"/><line x1="45" y1="195" x2="1185" y2="195" stroke="#9ba4ac"/><line x1="45" x2="1185" y1="31" y2="31" stroke="#8a4" stroke-dasharray="6 5"/><polyline id="filteredLine" points="" fill="none" stroke="#263847" stroke-width="2"/><polyline id="projectedLine" points="" fill="none" stroke="#9b5b22" stroke-width="1.5"/><text x="50" y="27" font-size="10">50 kg target</text></svg></section>
-<section class="card wide"><div class="label">Completed cycles</div><table><thead><tr><th>Cycle</th><th>Final kg</th><th>Error kg</th><th>Cutoff kg</th><th>Rate @ cutoff</th><th>Fill total s</th></tr></thead><tbody id="cycles"></tbody></table></section></div>
-<script>const filtered=[],projected=[];function f(v,n=3){return Number(v||0).toFixed(n)}async function cmd(a){await fetch('/api/run/'+a,{method:'POST'});if(a==='reset'){filtered.length=0;projected.length=0}}function row(n,v,s=''){return `<div class="signal"><span>${n}</span><b>${v}${s?` <span class="source">${s}</span>`:''}</b></div>`}function plot(a,b){filtered.push(a);projected.push(b);if(filtered.length>400){filtered.shift();projected.shift()}const make=arr=>arr.map((v,i)=>`${(45+i/Math.max(arr.length-1,1)*1140).toFixed(1)},${(195-Math.max(0,Math.min(55,v))/55*180).toFixed(1)}`).join(' ');document.getElementById('filteredLine').setAttribute('points',make(filtered));document.getElementById('projectedLine').setAttribute('points',make(projected))}async function loadCycles(){const d=await fetch('/api/cycles?limit=8').then(r=>r.json());document.getElementById('cycles').innerHTML=d.map(c=>`<tr><td>${c.cycle_id}</td><td>${f(c.final_weight_kg)}</td><td>${f(c.final_error_kg)}</td><td>${f(c.weight_at_cutoff_kg)}</td><td>${f(c.estimated_rate_at_cutoff_kg_s,2)}</td><td>${f(c.fill_total_s,2)}</td></tr>`).join('')}function render(s){const m=s.measurements,e=s.estimates,t=s.truth,c=s.commands;state.textContent=s.state.toUpperCase();run.textContent=s.running?'RUNNING':'STOPPED';cycle.textContent=s.cycle_id;clock.textContent=f(s.timestamp,2)+' s';raw.textContent=f(m['weight.net'].value)+' kg';filtered.textContent=f(e.weight_filtered_kg)+' kg';projected.textContent=f(e.projected_final_kg)+' kg';rate.textContent=f(e.fill_rate_kg_s,2)+' kg/s';bagWeight.textContent=f(t.mass_kg)+' kg';trueMass.textContent=f(t.mass_kg)+' kg';gateCmd.textContent=f(t.gate_command*100,0)+'%';gateActual.textContent=f(t.gate_actual*100,0)+'%';flowGate.textContent=f(t.flow_gate_kg_s,2)+' kg/s';flowBag.textContent=f(t.flow_bag_kg_s,2)+' kg/s';stable.textContent=e.stable?'YES':'NO';flow.setAttribute('opacity',Math.min(.85,.12+t.flow_bag_kg_s/10));signals.innerHTML=['machine.running','product.available','bag.present','position.discharge_window'].map(k=>row(k,m[k].value?'ON':'OFF',m[k].source.toUpperCase())).join('');commands.innerHTML=row('fill stage',c.fill_stage)+row('motor',c.filling_motor?'ON':'OFF')+row('aeration',c.aeration?'ON':'OFF')+row('push',c.push?'ON':'OFF');plot(e.weight_filtered_kg,e.projected_final_kg)}function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/live');ws.onmessage=e=>render(JSON.parse(e.data));ws.onclose=()=>setTimeout(connect,1000)}connect();setInterval(loadCycles,1500);loadCycles();</script></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SP01 Filling Controller</title>
+<style>
+:root{
+  font-family:Inter,Segoe UI,Arial,sans-serif;
+  color:#15202b;background:#e8edf1;
+  --panel:#f8fafb;--line:#65727d;--wire:#65727d;--on:#17834d;--off:#a7b0b8;
+  --cmd:#c87617;--input:#2b6da8;--danger:#b43a35;--ink:#15202b;
+}
+*{box-sizing:border-box}body{margin:0;background:#e8edf1}.top{height:60px;background:#121a22;color:#fff;display:flex;align-items:center;gap:18px;padding:0 20px;border-bottom:3px solid #394550}.top b{font-size:16px}.badge{padding:4px 9px;border:1px solid #66727d;border-radius:3px;font-size:11px;letter-spacing:.06em}.top .spacer{margin-left:auto}.layout{display:grid;grid-template-columns:minmax(760px,1fr) 310px;gap:12px;padding:12px}.card{background:#fff;border:1px solid #c8d0d6;border-radius:5px;box-shadow:0 1px 2px #00000010}.card-head{height:38px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #d9dfe4;background:#f5f7f8;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.machine{padding:8px;height:675px}.side{display:flex;flex-direction:column;gap:12px}.panel{padding:12px}.label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#67737e}.state{font-size:24px;font-weight:800;margin:3px 0 8px}.buttons{display:flex;gap:7px;flex-wrap:wrap}button{border:1px solid #8b969f;background:#fff;padding:7px 11px;border-radius:3px;cursor:pointer;font-weight:600}button.primary{background:#1c2a35;color:#fff;border-color:#1c2a35}.signal{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #edf0f2;font-size:12px}.source{font-size:9px;border:1px solid #bbc3ca;padding:1px 4px;border-radius:2px;margin-left:4px;font-weight:500}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 12px;border-top:1px solid #d9dfe4}.metric{background:#f8fafb;border:1px solid #d8dee3;padding:8px}.metric strong{display:block;font-size:18px;margin-top:3px}.wide{grid-column:1/-1}.chart{height:245px;padding:8px 12px}.cycles{padding:8px 12px 12px}table{width:100%;border-collapse:collapse;font-size:11px}td,th{text-align:left;border-bottom:1px solid #e5e8eb;padding:6px}.io-legend{display:flex;gap:14px;font-size:10px;color:#58636d}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}.dot.input{background:var(--input)}.dot.output{background:var(--cmd)}.dot.live{background:var(--on)}
+svg{font-family:Inter,Segoe UI,Arial,sans-serif}.wire{fill:none;stroke:var(--wire);stroke-width:2}.wire.input{stroke:var(--input)}.wire.output{stroke:var(--cmd)}.wire.live{stroke:var(--on);stroke-width:3}.wire.bus{stroke:#4c5964;stroke-width:3}.device{fill:#f8fafb;stroke:#5d6973;stroke-width:1.5}.device-title{font-size:11px;font-weight:700;fill:#1c2730}.device-sub{font-size:9px;fill:#5e6a74}.terminal{fill:#fff;stroke:#65727d}.terminal.in{stroke:var(--input)}.terminal.out{stroke:var(--cmd)}.terminal.on{fill:var(--on);stroke:var(--on)}.terminal-text{font-size:8px;fill:#27323b}.cabinet{fill:#dde3e7;stroke:#394650;stroke-width:2}.cabinet-inner{fill:#f4f6f7;stroke:#7c8790}.section-label{font-size:9px;font-weight:700;fill:#59656f;letter-spacing:.08em}.flow{fill:#b89b64;opacity:.14}.flow.live{opacity:.82}.bag{fill:#f5efe4;stroke:#665d51;stroke-width:1.5}.motor-body{fill:#dfe5e8;stroke:#4f5d67}.motor-live{fill:#cfe8db;stroke:var(--on);stroke-width:2}.coil{fill:#e8ecef;stroke:#58656f}.coil-live{fill:#d7ecdf;stroke:var(--on)}.cylinder{fill:#dfe5e8;stroke:#59656f}.rod{stroke:#59656f;stroke-width:5}.active-text{fill:var(--on);font-weight:700}.off-text{fill:#69747d}.small-note{font-size:8px;fill:#76818a}.weight-display{fill:#111820;stroke:#000}.weight-text{fill:#9ef5bd;font-family:Consolas,monospace;font-size:15px;font-weight:700}.conveyor{fill:#d8dde1;stroke:#65717a}.roller{fill:#89949d}.hopper-fill{fill:#bba272}.hopper-shell{fill:#e0e5e8;stroke:#5d6973;stroke-width:1.5}
+@media(max-width:1180px){.layout{grid-template-columns:1fr}.machine{height:auto;min-height:650px}}
+</style>
+</head>
+<body>
+<div class="top">
+  <b>FILLING CONTROLLER / SP01</b><span class="badge">DIGITAL TWIN</span><span id="run" class="badge">STOPPED</span><span>Cycle <b id="cycle">1</b></span><span class="spacer" id="clock">0.00 s</span>
+</div>
+<div class="layout">
+  <section class="card">
+    <div class="card-head"><span>Machine wiring mimic</span><div class="spacer"></div><div class="io-legend"><span><i class="dot input"></i>INPUT</span><span><i class="dot output"></i>OUTPUT</span><span><i class="dot live"></i>ACTIVE</span></div></div>
+    <div class="machine">
+      <svg id="mimic" viewBox="0 0 1180 640" width="100%" height="100%" aria-label="SP01 controller and machine wiring diagram">
+        <!-- hopper -->
+        <g id="dev-hopper">
+          <path class="hopper-shell" d="M420 30 H660 L625 135 H455 Z"/>
+          <path class="hopper-fill" d="M438 48 H642 L620 112 H460 Z" opacity=".72"/>
+          <text x="540" y="70" text-anchor="middle" class="device-title">CEMENT HOPPER</text>
+          <text x="540" y="88" text-anchor="middle" class="device-sub">product supply</text>
+          <circle id="lamp-product" cx="628" cy="45" r="7" fill="#a7b0b8"/><text x="614" y="27" class="small-note">AVAILABLE</text>
+        </g>
+
+        <!-- controller cabinet -->
+        <g id="controller">
+          <rect x="35" y="120" width="310" height="420" rx="5" class="cabinet"/>
+          <rect x="53" y="145" width="274" height="66" rx="3" class="cabinet-inner"/>
+          <text x="190" y="168" text-anchor="middle" class="device-title">SP01 CONTROLLER</text>
+          <text x="190" y="185" text-anchor="middle" class="device-sub">portable runtime / state machine</text>
+          <rect x="87" y="191" width="206" height="10" rx="2" fill="#bec7cd"/>
+          <text id="cab-state" x="190" y="235" text-anchor="middle" font-size="16" font-weight="800">IDLE</text>
+          <text x="68" y="266" class="section-label">DIGITAL INPUTS</text>
+          <text x="211" y="266" class="section-label">DIGITAL / ANALOG OUTPUTS</text>
+
+          <!-- input terminals -->
+          <g id="term-machine"><circle cx="72" cy="291" r="7" class="terminal in"/><text x="85" y="294" class="terminal-text">DI01 MACHINE RUN</text></g>
+          <g id="term-initiative"><circle cx="72" cy="326" r="7" class="terminal in"/><text x="85" y="329" class="terminal-text">DI02 PROCESS INIT</text></g>
+          <g id="term-product"><circle cx="72" cy="361" r="7" class="terminal in"/><text x="85" y="364" class="terminal-text">DI03 PRODUCT OK</text></g>
+          <g id="term-downstream"><circle cx="72" cy="396" r="7" class="terminal in"/><text x="85" y="399" class="terminal-text">DI04 CONVEYOR READY</text></g>
+          <g id="term-bag"><circle cx="72" cy="431" r="7" class="terminal in"/><text x="85" y="434" class="terminal-text">DI05 BAG PRESENT</text></g>
+          <g id="term-position"><circle cx="72" cy="466" r="7" class="terminal in"/><text x="85" y="469" class="terminal-text">DI06 PUSH POSITION</text></g>
+          <g id="term-weight"><circle cx="72" cy="501" r="7" class="terminal in"/><text x="85" y="504" class="terminal-text">AI01 WEIGHT NET</text></g>
+
+          <!-- output terminals -->
+          <g id="term-scanner"><circle cx="310" cy="291" r="7" class="terminal out"/><text x="298" y="294" text-anchor="end" class="terminal-text">DO01 SCANNER CYL</text></g>
+          <g id="term-bagair"><circle cx="310" cy="326" r="7" class="terminal out"/><text x="298" y="329" text-anchor="end" class="terminal-text">DO02 BAG AIR</text></g>
+          <g id="term-gate"><circle cx="310" cy="361" r="7" class="terminal out"/><text x="298" y="364" text-anchor="end" class="terminal-text">AO01 DOSING GATE</text></g>
+          <g id="term-motor"><circle cx="310" cy="396" r="7" class="terminal out"/><text x="298" y="399" text-anchor="end" class="terminal-text">DO03 FILL MOTOR</text></g>
+          <g id="term-aeration"><circle cx="310" cy="431" r="7" class="terminal out"/><text x="298" y="434" text-anchor="end" class="terminal-text">DO04 AERATION</text></g>
+          <g id="term-push"><circle cx="310" cy="466" r="7" class="terminal out"/><text x="298" y="469" text-anchor="end" class="terminal-text">DO05 PUSH CYL</text></g>
+        </g>
+
+        <!-- filling machine -->
+        <g id="fill-unit">
+          <rect x="465" y="150" width="150" height="36" rx="3" class="device"/>
+          <text x="540" y="171" text-anchor="middle" class="device-title">DOSING GATE</text>
+          <rect id="gate-blade" x="500" y="188" width="80" height="12" rx="2" fill="#7d8992"/>
+          <g id="gate-cylinder"><rect x="620" y="153" width="95" height="30" rx="4" class="cylinder"/><line id="gate-rod" x1="620" y1="168" x2="585" y2="168" class="rod"/><text x="668" y="173" text-anchor="middle" class="device-sub">GATE CYLINDER</text></g>
+
+          <g id="fill-motor"><rect x="710" y="221" width="105" height="58" rx="10" class="motor-body"/><circle cx="730" cy="250" r="15" fill="none" stroke="#66727c"/><text x="770" y="246" text-anchor="middle" class="device-title">MOTOR</text><text x="770" y="261" text-anchor="middle" class="device-sub">impeller</text><line x1="710" y1="250" x2="625" y2="250" stroke="#59656f" stroke-width="6"/></g>
+
+          <g id="aeration-valve"><path d="M440 227 L462 241 L440 255 L418 241 Z" class="coil"/><text x="440" y="276" text-anchor="middle" class="device-sub">AERATION VALVE</text></g>
+          <line x1="462" y1="241" x2="490" y2="241" stroke="#60707a" stroke-width="3"/>
+
+          <rect x="490" y="212" width="135" height="92" rx="8" class="device"/>
+          <text x="557" y="235" text-anchor="middle" class="device-title">FILLING SPOUT SP01</text>
+          <text x="557" y="252" text-anchor="middle" class="device-sub">impeller / valve bag</text>
+          <path id="flow" class="flow" d="M540 200 L524 386 L590 386 L565 200 Z"/>
+        </g>
+
+        <!-- bag detect / scanner cylinders -->
+        <g id="scanner-cylinder"><rect x="370" y="316" width="93" height="28" rx="4" class="cylinder"/><line id="scanner-rod" x1="463" y1="330" x2="500" y2="330" class="rod"/><text x="416" y="311" text-anchor="middle" class="device-sub">SCANNER CYL</text></g>
+        <g id="bag-air-valve"><path d="M388 374 L407 386 L388 398 L369 386 Z" class="coil"/><text x="388" y="418" text-anchor="middle" class="device-sub">BAG DETECT AIR</text><line x1="407" y1="386" x2="492" y2="386" stroke="#60707a" stroke-width="2" stroke-dasharray="5 4"/></g>
+
+        <!-- bag / load cell -->
+        <g id="bag-group">
+          <path id="bag" class="bag" d="M500 370 Q557 348 614 370 L606 490 Q557 510 508 490 Z"/>
+          <text x="557" y="405" text-anchor="middle" class="device-title">VALVE BAG</text>
+          <rect x="518" y="430" width="78" height="30" rx="2" class="weight-display"/>
+          <text id="bagWeight" x="557" y="450" text-anchor="middle" class="weight-text">0.000 kg</text>
+          <rect x="493" y="499" width="128" height="18" rx="3" class="device"/>
+          <text x="557" y="513" text-anchor="middle" class="device-sub">LOAD CELL / WEIGH FRAME</text>
+          <circle id="lamp-bag" cx="620" cy="372" r="7" fill="#a7b0b8"/><text x="631" y="375" class="small-note">BAG PRESENT</text>
+        </g>
+
+        <!-- push cylinder -->
+        <g id="push-cylinder"><rect x="690" y="405" width="108" height="32" rx="4" class="cylinder"/><line id="push-rod" x1="690" y1="421" x2="618" y2="421" class="rod"/><text x="744" y="399" text-anchor="middle" class="device-sub">PUSH-OFF CYLINDER</text></g>
+        <circle id="lamp-position" cx="806" cy="421" r="7" fill="#a7b0b8"/><text x="817" y="424" class="small-note">POSITION WINDOW</text>
+
+        <!-- bag conveyor -->
+        <g id="bag-conveyor">
+          <rect x="470" y="548" width="500" height="28" rx="3" class="conveyor"/>
+          <circle cx="500" cy="562" r="10" class="roller"/><circle cx="555" cy="562" r="10" class="roller"/><circle cx="610" cy="562" r="10" class="roller"/><circle cx="665" cy="562" r="10" class="roller"/><circle cx="720" cy="562" r="10" class="roller"/><circle cx="775" cy="562" r="10" class="roller"/><circle cx="830" cy="562" r="10" class="roller"/><circle cx="885" cy="562" r="10" class="roller"/><circle cx="940" cy="562" r="10" class="roller"/>
+          <text x="720" y="602" text-anchor="middle" class="device-title">BAG DISCHARGE CONVEYOR</text>
+          <circle id="lamp-downstream" cx="965" cy="553" r="7" fill="#a7b0b8"/><text x="975" y="557" class="small-note">READY</text>
+        </g>
+
+        <!-- external machine/process input -->
+        <g><rect x="875" y="35" width="245" height="74" rx="4" class="device"/><text x="997" y="58" text-anchor="middle" class="device-title">PACKER COMMON CONTROL</text><text x="997" y="78" text-anchor="middle" class="device-sub">machine running / process initiative</text><circle id="lamp-machine" cx="912" cy="94" r="7" fill="#a7b0b8"/><text x="923" y="98" class="small-note">RUN</text><circle id="lamp-initiative" cx="1011" cy="94" r="7" fill="#a7b0b8"/><text x="1022" y="98" class="small-note">INIT</text></g>
+
+        <!-- input wiring -->
+        <path id="wire-machine" class="wire input" d="M875 72 H840 V291 H72"/>
+        <path id="wire-initiative" class="wire input" d="M875 88 H825 V326 H72"/>
+        <path id="wire-product" class="wire input" d="M628 45 H790 V361 H72"/>
+        <path id="wire-downstream" class="wire input" d="M965 553 H1000 V525 H360 V396 H72"/>
+        <path id="wire-bag" class="wire input" d="M620 372 H650 V520 H380 V431 H72"/>
+        <path id="wire-position" class="wire input" d="M806 421 H842 V505 H395 V466 H72"/>
+        <path id="wire-weight" class="wire input" d="M493 508 H408 V501 H72"/>
+
+        <!-- output wiring -->
+        <path id="wire-scanner" class="wire output" d="M310 291 H350 V330 H370"/>
+        <path id="wire-bagair" class="wire output" d="M310 326 H335 V386 H369"/>
+        <path id="wire-gate" class="wire output" d="M310 361 H350 V135 H668 V153"/>
+        <path id="wire-motor" class="wire output" d="M310 396 H365 V286 H755 V221"/>
+        <path id="wire-aeration" class="wire output" d="M310 431 H340 V241 H418"/>
+        <path id="wire-push" class="wire output" d="M310 466 H355 V530 H845 V421 H798"/>
+      </svg>
+    </div>
+    <div class="metrics">
+      <div class="metric"><span class="label">Raw weight</span><strong id="raw">0 kg</strong></div>
+      <div class="metric"><span class="label">Filtered</span><strong id="filtered">0 kg</strong></div>
+      <div class="metric"><span class="label">Projected final</span><strong id="projected">0 kg</strong></div>
+      <div class="metric"><span class="label">Fill rate</span><strong id="rate">0 kg/s</strong></div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <section class="card"><div class="card-head">Controller</div><div class="panel"><div class="label">State</div><div id="state" class="state">IDLE</div><div class="buttons"><button class="primary" onclick="cmd('start')">Start</button><button onclick="cmd('stop')">Stop</button><button onclick="cmd('reset')">Reset</button></div></div></section>
+    <section class="card"><div class="card-head">Inputs</div><div class="panel" id="inputs"></div></section>
+    <section class="card"><div class="card-head">Outputs</div><div class="panel" id="outputs"></div></section>
+    <section class="card"><div class="card-head">Plant diagnostics</div><div class="panel"><div class="signal"><span>True mass</span><b id="trueMass">0</b></div><div class="signal"><span>Gate command</span><b id="gateCmd">0%</b></div><div class="signal"><span>Gate actual</span><b id="gateActual">0%</b></div><div class="signal"><span>Flow at gate</span><b id="flowGate">0</b></div><div class="signal"><span>Flow into bag</span><b id="flowBag">0</b></div><div class="signal"><span>Weight stable</span><b id="stable">NO</b></div></div></section>
+  </aside>
+
+  <section class="card wide"><div class="card-head">Weight trace — filtered / projected / target</div><div class="chart"><svg viewBox="0 0 1200 210" width="100%" height="210"><line x1="45" y1="15" x2="45" y2="190" stroke="#9ba4ac"/><line x1="45" y1="190" x2="1185" y2="190" stroke="#9ba4ac"/><line x1="45" x2="1185" y1="31" y2="31" stroke="#4c8a61" stroke-dasharray="6 5"/><polyline id="filteredLine" points="" fill="none" stroke="#263847" stroke-width="2"/><polyline id="projectedLine" points="" fill="none" stroke="#b46a1e" stroke-width="1.5"/><text x="50" y="27" font-size="10">50 kg target</text></svg></div></section>
+  <section class="card wide"><div class="card-head">Completed cycles</div><div class="cycles"><table><thead><tr><th>Cycle</th><th>Final kg</th><th>Error kg</th><th>Cutoff kg</th><th>Rate @ cutoff</th><th>Fill total s</th></tr></thead><tbody id="cycles"></tbody></table></div></section>
+</div>
+<script>
+const traceFiltered=[],traceProjected=[];
+const $=id=>document.getElementById(id);
+function f(v,n=3){return Number(v||0).toFixed(n)}
+async function cmd(a){await fetch('/api/run/'+a,{method:'POST'});if(a==='reset'){traceFiltered.length=0;traceProjected.length=0}}
+function row(n,v,s=''){return `<div class="signal"><span>${n}</span><b>${v}${s?` <span class="source">${s}</span>`:''}</b></div>`}
+function bool(v){return v?'ON':'OFF'}
+function setLamp(id,on){$(id).setAttribute('fill',on?'#17834d':'#a7b0b8')}
+function setTerminal(id,on){const c=$(id).querySelector('circle');c.setAttribute('class',c.getAttribute('class').replace(/\s+on/g,'')+(on?' on':''))}
+function setWire(id,on){const w=$(id);w.setAttribute('class',w.getAttribute('class').replace(/\s+live/g,'')+(on?' live':''))}
+function setDeviceLive(id,on,base,live){const el=$(id);if(el)el.setAttribute('class',on?live:base)}
+function plot(a,b){traceFiltered.push(a);traceProjected.push(b);if(traceFiltered.length>450){traceFiltered.shift();traceProjected.shift()}const make=arr=>arr.map((v,i)=>`${(45+i/Math.max(arr.length-1,1)*1140).toFixed(1)},${(190-Math.max(0,Math.min(55,v))/55*175).toFixed(1)}`).join(' ');$('filteredLine').setAttribute('points',make(traceFiltered));$('projectedLine').setAttribute('points',make(traceProjected))}
+async function loadCycles(){const d=await fetch('/api/cycles?limit=8').then(r=>r.json());$('cycles').innerHTML=d.map(c=>`<tr><td>${c.cycle_id}</td><td>${f(c.final_weight_kg)}</td><td>${f(c.final_error_kg)}</td><td>${f(c.weight_at_cutoff_kg)}</td><td>${f(c.estimated_rate_at_cutoff_kg_s,2)}</td><td>${f(c.fill_total_s,2)}</td></tr>`).join('')}
+function render(s){
+  const m=s.measurements,e=s.estimates,t=s.truth,c=s.commands;
+  const get=k=>m[k]?.value;
+  const src=k=>(m[k]?.source||'').toUpperCase();
+  const machine=!!get('machine.running'),initiative=!!get('process.initiative'),product=!!get('product.available'),downstream=!!get('downstream.ready'),bag=!!get('bag.present'),position=!!get('position.discharge_window');
+  const scanner=!!c.scanner_down,bagair=!!c.bag_detect_air,motor=!!c.filling_motor,aer=!!c.aeration,push=!!c.push,gate=Number(t.gate_command||0)>0;
+
+  $('state').textContent=s.state.toUpperCase();$('cab-state').textContent=s.state.toUpperCase();$('run').textContent=s.running?'RUNNING':'STOPPED';$('cycle').textContent=s.cycle_id;$('clock').textContent=f(s.timestamp,2)+' s';
+  $('raw').textContent=f(get('weight.net'))+' kg';$('filtered').textContent=f(e.weight_filtered_kg)+' kg';$('projected').textContent=f(e.projected_final_kg)+' kg';$('rate').textContent=f(e.fill_rate_kg_s,2)+' kg/s';$('bagWeight').textContent=f(t.mass_kg)+' kg';
+  $('trueMass').textContent=f(t.mass_kg)+' kg';$('gateCmd').textContent=f(t.gate_command*100,0)+'%';$('gateActual').textContent=f(t.gate_actual*100,0)+'%';$('flowGate').textContent=f(t.flow_gate_kg_s,2)+' kg/s';$('flowBag').textContent=f(t.flow_bag_kg_s,2)+' kg/s';$('stable').textContent=e.stable?'YES':'NO';
+
+  $('inputs').innerHTML=[['DI01 Machine running',machine,'machine.running'],['DI02 Process initiative',initiative,'process.initiative'],['DI03 Product available',product,'product.available'],['DI04 Conveyor ready',downstream,'downstream.ready'],['DI05 Bag present',bag,'bag.present'],['DI06 Push position',position,'position.discharge_window'],['AI01 Weight net',f(get('weight.net'))+' kg','weight.net']].map(([n,v,k])=>row(n,typeof v==='boolean'?bool(v):v,src(k))).join('');
+  $('outputs').innerHTML=row('DO01 Scanner cylinder',bool(scanner))+row('DO02 Bag detect air',bool(bagair))+row('AO01 Dosing gate',c.fill_stage.toUpperCase()+' / '+f(t.gate_command*100,0)+'%')+row('DO03 Filling motor',bool(motor))+row('DO04 Aeration valve',bool(aer))+row('DO05 Push cylinder',bool(push));
+
+  [['lamp-machine',machine],['lamp-initiative',initiative],['lamp-product',product],['lamp-downstream',downstream],['lamp-bag',bag],['lamp-position',position]].forEach(([id,on])=>setLamp(id,on));
+  [['term-machine',machine],['term-initiative',initiative],['term-product',product],['term-downstream',downstream],['term-bag',bag],['term-position',position],['term-weight',true],['term-scanner',scanner],['term-bagair',bagair],['term-gate',gate],['term-motor',motor],['term-aeration',aer],['term-push',push]].forEach(([id,on])=>setTerminal(id,on));
+  [['wire-machine',machine],['wire-initiative',initiative],['wire-product',product],['wire-downstream',downstream],['wire-bag',bag],['wire-position',position],['wire-weight',true],['wire-scanner',scanner],['wire-bagair',bagair],['wire-gate',gate],['wire-motor',motor],['wire-aeration',aer],['wire-push',push]].forEach(([id,on])=>setWire(id,on));
+
+  setDeviceLive('fill-motor',motor,'','');
+  $('fill-motor').querySelector('rect').setAttribute('class',motor?'motor-live':'motor-body');
+  $('aeration-valve').querySelector('path').setAttribute('class',aer?'coil-live':'coil');
+  $('bag-air-valve').querySelector('path').setAttribute('class',bagair?'coil-live':'coil');
+  $('push-cylinder').querySelector('rect').setAttribute('class',push?'coil-live':'cylinder');
+  $('scanner-cylinder').querySelector('rect').setAttribute('class',scanner?'coil-live':'cylinder');
+  $('gate-cylinder').querySelector('rect').setAttribute('class',gate?'coil-live':'cylinder');
+  $('gate-blade').setAttribute('x',500+Math.min(55,Number(t.gate_actual||0)*55));
+  $('gate-blade').setAttribute('width',80-Math.min(55,Number(t.gate_actual||0)*55));
+  $('flow').setAttribute('class',t.flow_bag_kg_s>0.05?'flow live':'flow');
+  $('bag').setAttribute('opacity',bag?'1':'.30');
+  plot(e.weight_filtered_kg,e.projected_final_kg);
+}
+function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/live');ws.onmessage=e=>render(JSON.parse(e.data));ws.onclose=()=>setTimeout(connect,1000)}
+connect();setInterval(loadCycles,1500);loadCycles();
+</script>
+</body>
+</html>
