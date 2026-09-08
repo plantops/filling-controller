@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SP01 Host HMI Preview</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1120px;margin:20px auto;padding:0 14px;background:#111;color:#eee}
+h1{font-size:22px;margin-bottom:4px}.banner{padding:8px 10px;border:1px solid #777;border-radius:8px;margin:10px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{border:1px solid #555;border-radius:8px;padding:12px}table{width:100%;border-collapse:collapse}td{padding:4px 5px;border-bottom:1px solid #333;vertical-align:top}
+.on{font-weight:700}.muted{opacity:.7}.bad{font-weight:700}button,input{font:inherit;padding:7px;margin:3px}button:disabled{opacity:.45}small{opacity:.75}code{font-family:ui-monospace,monospace}
+</style></head><body>
+<h1>SP01 Filling Controller</h1>
+<div class="banner"><b>HOST PREVIEW / XEM THỬ TRÊN LINUX AMD64</b><br><small>Mock state only. No GPIO, no Modbus, no actuator authority. Parameters below mirror current Kconfig defaults and are read-only in this preview.</small></div>
+<div class="grid">
+<div class="card"><b>Status / Trạng thái</b><table><tr><td>Mode</td><td id="mode">AUTO</td></tr><tr><td>State</td><td id="state">WAIT_FILL_POSITION</td></tr><tr><td>Fault</td><td>NONE</td></tr><tr><td>Cycle</td><td id="cycle">0</td></tr><tr><td>Weight / Khối lượng</td><td id="weight">0.000 kg</td></tr><tr><td>Stable</td><td id="stable">YES</td></tr></table></div>
+<div class="card"><b>I/O preview</b><table id="io"></table></div>
+<div class="card"><b>Parameters / Tham số</b><table>
+<tr><td>Control period</td><td>10 ms</td></tr>
+<tr><td>Target</td><td>50.000 kg</td></tr>
+<tr><td>Coarse → Fine</td><td>40.000 kg</td></tr>
+<tr><td>Cutoff margin</td><td>0 g</td></tr>
+<tr><td>Max weight age</td><td>500 ms</td></tr>
+<tr><td>Bag acquire timeout</td><td>2000 ms</td></tr>
+<tr><td>Coarse timeout</td><td>12000 ms</td></tr>
+<tr><td>Fine timeout</td><td>5000 ms</td></tr>
+<tr><td>Minimum settle</td><td>200 ms</td></tr>
+<tr><td>Wait discharge timeout</td><td>6000 ms</td></tr>
+<tr><td>Push duration</td><td>500 ms</td></tr>
+<tr><td>Discharge countdown</td><td>1000 counts</td></tr>
+<tr><td>Discharge lead trim</td><td>0 counts</td></tr>
+<tr><td>DI invert mask</td><td><code>0x00</code></td></tr>
+<tr><td>DO invert mask</td><td><code>0x00</code></td></tr>
+<tr><td>TLB485</td><td>9600 8N1 · addr 1 · poll 50 ms</td></tr>
+</table><p><small>Production values are configured under <code>menuconfig → SP01 Filling Controller</code>.</small></p></div>
+<div class="card"><b>Calibration / Hiệu chuẩn</b><p>Service ready: <b>NO — HOST PREVIEW</b></p><button disabled>SET ZERO</button><br><button disabled>CHECK 20 kg</button><br><button disabled>SET SPAN 50 kg</button><br><button disabled>VERIFY 50 kg</button><p><small>Real calibration writes remain disabled until the installed TLB485 protocol/manual revision is verified and service interlocks are satisfied.</small></p></div>
+<div class="card"><b>Diagnostics / Chẩn đoán</b><pre id="diag">host=linux-amd64\nsource=mock-preview\nTLB=not connected\nDO authority=none</pre></div>
+</div>
+<script>
+const states=['WAIT_FILL_POSITION','BAG_ACQUIRE','TARE_READY','COARSE_FILL','FINE_FILL','SETTLE','WAIT_DISCHARGE','PUSH','COMPLETE'];
+let step=0,cycle=0;
+function ioBits(state){let di=0b00001111,dov=0;if(state!=='WAIT_FILL_POSITION')di|=1<<4;if(['TARE_READY','COARSE_FILL','FINE_FILL','SETTLE','WAIT_DISCHARGE'].includes(state))di|=1<<5;if(state==='COARSE_FILL')dov=0b11111011;if(state==='FINE_FILL')dov=0b11101011;if(['BAG_ACQUIRE','TARE_READY','SETTLE','WAIT_DISCHARGE'].includes(state))dov=0b00000011;if(state==='PUSH')dov=0b00000100;let s='';for(let i=0;i<8;i++)s+=`<tr><td>DI${i+1}</td><td class="${di&(1<<i)?'on':''}">${di&(1<<i)?'ON':'OFF'}</td><td>DO${i+1}</td><td class="${dov&(1<<i)?'on':''}">${dov&(1<<i)?'ON':'OFF'}</td></tr>`;return s}
+function tick(){const st=states[step];state.textContent=st;let w=0;if(st==='COARSE_FILL')w=24;if(st==='FINE_FILL')w=44.5;if(['SETTLE','WAIT_DISCHARGE','PUSH','COMPLETE'].includes(st))w=50.06;weight.textContent=w.toFixed(3)+' kg';stable.textContent=['WAIT_FILL_POSITION','SETTLE','WAIT_DISCHARGE','PUSH','COMPLETE'].includes(st)?'YES':'NO';io.innerHTML=ioBits(st);if(st==='COMPLETE'){cycle++;document.getElementById('cycle').textContent=cycle;}step=(step+1)%states.length;setTimeout(tick,900)}
+tick();
+</script></body></html>
