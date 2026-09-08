@@ -21,7 +21,7 @@ Wi-Fi không nằm trong vòng điều khiển. Controller, cân và I/O đều 
 ## Chạy simulation trên Linux amd64
 
 ```bash
-git switch fw-sp01-v0.1
+git switch main
 git pull --ff-only
 
 cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
@@ -134,10 +134,12 @@ Calibration từ Web HMI chỉ được phép khi đồng thời thỏa điều 
 
 | Branch | Mục đích |
 |---|---|
-| `main` | spec và integrated baseline hiện hành |
-| `fw-sp01-v0.1` | nhánh tích hợp firmware SP01 |
+| `main` | spec + integrated SP01 RC baseline hiện hành |
+| `fw-sp01-v0.1` | nhánh phát triển firmware SP01; sync với RC baseline |
 | `py-sim` | digital twin Python / replay / đối chiếu |
 | `debate` | lịch sử thảo luận và red-team |
+
+Version hiện tại: [`VERSION`](VERSION) = `0.1.0-rc1`.
 
 ## Tài liệu cần đọc
 
