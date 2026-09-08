@@ -6,6 +6,10 @@
 
 v0.1 intentionally builds **one spout only: SP01**. Do not purchase or build eight nodes yet.
 
+The first physical connection is to a **dummy 24 V DI/DO bench harness**, not to the real packer. Real SP01 wiring is connected later through explicit shadow/live gates.
+
+Current planning assumption: **24 VDC is available on the rotating packer**. Its quality, grounding, available current and transient behavior still require measurement before real-machine connection.
+
 The rotary packer has no practical stationary Ethernet path at the spout. Therefore the prototype uses:
 
 ```text
@@ -28,7 +32,7 @@ At 2,000 bags/h with 8 spouts:
 
                  Laptop / engineering browser
                            │
-                     Wi-Fi or LAN
+                         LAN preferred
                            │
                            ▼
                  ┌───────────────────┐
@@ -45,7 +49,7 @@ At 2,000 bags/h with 8 spouts:
                            │
                  ┌─────────▼─────────┐
                  │ ESP32-S3 SP01     │
-                 │ FreeRTOS          │
+                 │ ESP-IDF/FreeRTOS  │
                  │ 8 isolated DI     │
                  │ 8 protected DO    │
                  │ isolated RS485    │
@@ -56,8 +60,8 @@ At 2,000 bags/h with 8 spouts:
                    RS485│       │local field I/O
                         │       │
                         ▼       ▼
-                  ┌──────────┐  machine devices
-                  │ LAUMAS   │
+                  ┌──────────┐  dummy harness first
+                  │ LAUMAS   │  real machine later
                   │ TLB485   │
                   └────┬─────┘
                        │
@@ -77,7 +81,7 @@ SP01 must remain autonomous when the AP/router, laptop, browser, or Wi-Fi link d
 Local deterministic path:
 
 ```text
-machine DI
+machine/dummy DI
    ↓
 ESP32 process image / FSM
    ↓
@@ -100,7 +104,7 @@ AP/router
 laptop/HMI/historian
 ```
 
-The supervisory path may observe and issue validated non-time-critical commands, but is not part of filling cutoff, interlocks, or actuator timing.
+The supervisory path may observe and issue only validated non-time-critical service/configuration commands. It is not part of filling cutoff, interlocks, actuator timing, or safety.
 
 ## 3. Physical node ownership
 
@@ -157,9 +161,9 @@ No blocking `delay()` calls are allowed in the control FSM. Every state has entr
 | DI07 | `position.push` | INPUT_6 |
 | DI08 | `spare` | reserved |
 
-All field DI are assumed to be industrial 24 V signals only after physical tracing and measurement. No legacy 24 V signal may connect directly to MCU GPIO.
+Bench stage uses eight labelled 24 V test switches/selectors. Real field DI are connected only after physical tracing and measurement. No legacy 24 V signal may connect directly to MCU GPIO.
 
-## 6. Weighing channel
+## 6. Weighing channel and calibration
 
 ```text
 load cell → LAUMAS TLB485 → isolated RS485 → ESP32-S3
@@ -175,17 +179,42 @@ The TLB owns load-cell excitation, A/D conversion, calibration/filtering, and we
 
 TLB-specific Modbus addresses belong only in the TLB adapter.
 
-Required interface:
+Required semantic interface:
 
 ```text
 WeighingUnit
   read_weight()
   read_status()
+  read_raw()            optional
+  is_stable()
   tare()
   zero()
+  begin_calibration()
+  set_span(reference_kg)
+  verify(reference_kg)
+  save_calibration()
+  cancel_calibration()
   health()
   diagnostics()
 ```
+
+Unsupported operations must not be invented if the selected TLB model does not expose them.
+
+**Calibration is a required firmware/HMI v0.1 function.** See `docs/WEIGHING_CALIBRATION.md`.
+
+Current commissioning procedure:
+
+```text
+empty saddle → SET ZERO
+20 kg known reference → CHECK
+50 kg standard → SET SPAN
+remove weight → VERIFY ZERO
+20 kg → VERIFY
+50 kg → VERIFY
+SAVE + LOCK
+```
+
+If 20 kg is not itself a trusted calibration standard, use it as a linearity/mechanical verification point rather than forcing a multi-point curve.
 
 The SP01 FSM must survive replacement of TLB by another weighing transmitter without changing state semantics.
 
@@ -218,9 +247,31 @@ Preserve the legacy pneumatic behavior:
 | FINE ~30% | 1 | 0 | 1 |
 | COARSE 100% | 1 | 1 | 1 |
 
-The controller core should reason in `OFF`, `FINE`, `COARSE`; the output binding expands the mode to three solenoids.
+The controller core reasons in `OFF`, `FINE`, `COARSE`; the output binding expands the mode to three solenoids.
 
-## 9. Local output electrical rules
+## 9. Dummy physical I/O first
+
+The controller must complete a full physical bench stage before any live packer output connection.
+
+Dummy input harness:
+
+```text
+DI01..DI08 <- labelled 24 V switches/selectors
+```
+
+Dummy output harness:
+
+```text
+DO01..DO08 -> 24 V lamps/electronic dummy loads
+```
+
+After logic verification, selected channels are tested using representative inductive loads/spare coils so that inrush, suppression, switching behavior and output-stage temperature are measured.
+
+Prefer a keyed/clearly distinguishable dummy harness versus real-machine harness. Software `BENCH` mode alone must not be the only barrier preventing accidental actuator energization.
+
+See `docs/BOM_SP01_V01.md`.
+
+## 10. Local output electrical rules
 
 All eight local outputs are occupied in v0.1.
 
@@ -243,7 +294,7 @@ Use interposing MOSFET/SSR/relay drivers if any load exceeds the validated contr
 
 `filling.motor` switches only a contactor/drive command. It must never switch motor power directly.
 
-## 10. Local fail state
+## 11. Local fail state
 
 On boot, reset, watchdog, brownout, firmware fault, abort, or loss of control authority, desired output image is:
 
@@ -260,7 +311,7 @@ DO08 aeration         OFF
 
 These are desired software states only until the actual valve/actuator mechanics are verified. A bistable valve or mechanically latched device invalidates the simple assumption `OFF = safe`.
 
-## 11. RS485 topology and future expansion
+## 12. RS485 topology and future expansion
 
 v0.1 local bus:
 
@@ -288,7 +339,7 @@ auxiliary alarms/beacon/buzzer/service outputs = RS485 expansion
 
 If expansion becomes material, prefer a separate UART/RS485 channel for I/O so auxiliary bus faults cannot delay TLB traffic.
 
-## 12. Wi-Fi topology
+## 13. Wi-Fi topology
 
 v0.1 uses exactly one dedicated stationary AP/router and one client node:
 
@@ -300,21 +351,22 @@ AP/router
    ))) ESP32-S3 SP01 in STA/client mode
 ```
 
-Recommended prototype rules:
+Prototype rules:
 
 - dedicated SSID for the packer prototype;
 - 2.4 GHz first;
+- laptop preferably wired to the AP/router during RF tests so only the rotating SP01 link is under RF test;
 - fixed AP location near/above the packer where practical;
 - do not depend on plant office/guest Wi-Fi;
 - Wi-Fi power-save disabled while machine-powered if supported/configured;
 - AP/router and ESP reconnect statistics recorded;
 - RSSI, disconnect reason, packet loss/latency and reconnect count exposed in diagnostics;
-- external/remote antenna placement preferred if the controller enclosure or machine steel significantly shields the radio;
+- external antenna placement preferred when machine steel shields the radio;
 - no Internet or cloud dependency for control or HMI.
 
 A per-spout SoftAP/service hotspot may be added later, but it is not required for v0.1 and must not broadcast permanently by default.
 
-## 13. Router/AP role
+## 14. Router/AP role
 
 The AP/router is **not a controller** and not a master.
 
@@ -339,7 +391,7 @@ records buffer locally
 
 The next safe local state transition must not require router recovery.
 
-## 14. HMI path
+## 15. HMI path
 
 ```text
 Laptop/browser
@@ -354,32 +406,46 @@ See `docs/HMI.md`.
 
 The browser must never directly address GPIO, raw Modbus registers, or physical coils.
 
-## 15. Power architecture
+Initial HMI is mostly read-only. Calibration is the required controlled write workflow in v0.1.
 
-The rotating node needs stable local control power. Reuse existing rotating 24 V only after measuring quality and grounding; otherwise add local conditioning/DC-DC as required.
+## 16. Power architecture
 
-Conceptual split:
+For planning, **24 VDC is assumed available on the rotating assembly**.
+
+Do not purchase a new production PSU by default. First measure the actual source:
 
 ```text
-rotating 24 V supply
+nominal/min/max voltage
+available current
+voltage dip during valves/contactors
+noise/transient behavior
+0 V / PE / shield relationship
+```
+
+If acceptable:
+
+```text
+existing rotating 24 V
       │
-      ├── CONTROL branch → ESP32 + TLB
+      ├── fused CONTROL branch → ESP32 + TLB
       │
       └── ACTUATOR branch → existing safety chain → solenoids/contactor coils
 ```
+
+If measurements show unacceptable noise/dips, add filtering or isolated DC/DC/local conditioning based on evidence.
 
 E-stop and safety-rated functions remain independent of ESP firmware and Wi-Fi.
 
 Prefer controller/TLB to remain powered when actuator power is removed so faults remain observable.
 
-## 16. FreeRTOS execution model
+## 17. FreeRTOS execution model
 
 Use a PLC-like process image:
 
 ```text
 read physical inputs
 → freeze INPUT IMAGE
-→ read/validate latest TLB weight
+→ read/validate latest TLB weight snapshot
 → execute SP01 FSM
 → build DESIRED OUTPUT IMAGE
 → apply interlocks
@@ -394,50 +460,59 @@ MEDIUM: TLB RS485 / position acquisition
 LOW:    Wi-Fi / HTTP / WebSocket / logging / configuration
 ```
 
-Wi-Fi or web work may never own an actuator and may never block the high-priority control path.
+Control uses monotonic physical time. Wi-Fi, web, storage or calibration UI may never own an actuator and may never block the high-priority control path.
 
-## 17. v0.1 BOM — one SP01 node + one AP/router
+See `docs/FW_SW_PLAN_SP01_V01.md`.
 
-**Budgetary only. Verify exact supplier and variant before purchase.**
+## 18. Procurement
 
-| Item | Qty | Budget range, VND | Notes |
-|---|---:|---:|---|
-| LAUMAS TLB RS485 | 1 | 5.5–7.0 M | weighing transmitter |
-| ESP32-S3 industrial 8DI/8DO + isolated RS485 + Wi-Fi carrier | 1 | 1.8–2.5 M | prototype controller |
-| dedicated Wi-Fi AP/router | 1 | 0.5–2.0 M | stationary prototype network |
-| 24 VDC supply/conditioning as required | 1 | 0.6–1.2 M | size after actual load survey |
-| DIN enclosure/backplate/rail | 1 set | 0.4–0.8 M | rotating SP01 node |
-| fused terminals/fuses/MCB | 1 set | 0.3–0.6 M | protection |
-| safety/actuator isolation additions | 1 set | 0.3–0.8 M | depends on existing machine |
-| shielded RS485 cable | 1 set | 0.1–0.2 M | local TLB link |
-| wire/ferrules/labels/glands | 1 set | 0.3–0.6 M | cabinet build |
-| optional external antenna/pigtail | 1 | 0.1–0.5 M | if RF survey requires |
-| optional interposing output drivers | as needed | 0–1.0 M | after coil survey |
+The detailed one-SP01 procurement and hold list is authoritative in `docs/BOM_SP01_V01.md`.
 
-Do not multiply the BOM by eight yet.
+Core procurement now:
 
-## 18. Prototype stages
+```text
+1 × ESP32-S3 8DI/8DO + isolated RS485 + Wi-Fi controller carrier
+1 × LAUMAS TLB485
+1 × dedicated stationary AP/router
+1 × external antenna + spare
+1 × USB-RS485 adapter
+1 × dummy 24 V DI/DO test harness set
+1 × enclosure/rail/terminal/wiring set
+```
 
-### P0 — current digital twin
+Do not multiply by eight yet.
 
-- semantic I/O and cycle model;
+## 19. Prototype stages
+
+### P0 — digital twin/reference
+
+- Python semantic I/O and cycle model;
+- shared conformance scenarios;
 - no hardware authority.
 
-### P1 — SP01 controller bench
+### P1 — dummy physical I/O bench
 
-- ESP board + switches/24 V input simulator;
-- lamps/dummy loads on all DO;
+- ESP board;
+- 24 V switches on DI01..DI08;
+- lamps/dummy loads on DO01..DO08;
+- then representative inductive loads;
 - AP/router + laptop HMI;
-- no machine wiring.
+- **no machine wiring**.
 
 ### P2 — weighing bench
 
-- TLB + representative load cell;
-- calibration, filtering, latency/jitter and stale-data tests.
+- TLB + load cell;
+- calibration UI/service workflow;
+- empty saddle zero;
+- 20 kg verification;
+- 50 kg standard span;
+- zero/20/50 verification;
+- filtering, latency/jitter, noise and stale-data tests.
 
-### P3 — wireless soak + dry FSM
+### P3 — integrated wireless dry FSM
 
 - ESP + TLB + dummy outputs;
+- complete state machine;
 - AP/router running continuously;
 - HMI traffic and reconnect stress;
 - AP power-cycle/disconnect during every FSM state;
@@ -446,16 +521,16 @@ Do not multiply the BOM by eight yet.
 ### P4 — rotating RF survey / shadow SP01
 
 - mount node/antenna in intended rotating location;
-- record RSSI, packet loss, disconnect/reconnect through full 360° rotation at realistic machine speeds;
-- read actual SP01 signals/weight where safely possible;
-- calculate but physically block proposed outputs;
+- record RSSI, packet loss, disconnect/reconnect through full 360° rotation at realistic speed;
+- connect real SP01 inputs/weight only where safely approved;
+- proposed DO remain electrically blocked from actuators;
 - compare against legacy sequence.
 
 ### P5 — controlled physical output pilot
 
 - one low-risk output at a time;
-- explicit authority and rollback;
-- AP/router may be intentionally disconnected to prove network independence.
+- explicit authority and physical rollback;
+- AP/router intentionally disconnected during test cases to prove network independence.
 
 ### P6 — full SP01 pilot
 
@@ -477,30 +552,34 @@ Ethernet-rated rotary joint
 
 Do not choose the eight-spout network topology before SP01 RF evidence exists.
 
-## 19. Mandatory v0.1 acceptance tests
+## 20. Mandatory v0.1 acceptance tests
 
 Before SP01 live actuation:
 
 1. safe local output states proven on boot/reset/watchdog/brownout;
-2. every legacy SP01 field wire physically traced;
-3. all eight coil/contactor loads measured;
-4. TLB end-to-end weight latency/filter delay measured;
-5. loss/staleness of TLB data forces bounded safe abort;
-6. AP/router power-off during every FSM state has **zero control effect**;
-7. browser/laptop disconnect has **zero control effect**;
-8. Wi-Fi reconnect storms do not violate control timing budget;
-9. RF quality measured through a complete rotation, not only with machine stationary;
-10. configuration and event records survive temporary Wi-Fi loss;
-11. safety chain remains independent of ESP/Wi-Fi;
-12. rollback to legacy SP01 is documented and tested;
-13. red-team blockers in `docs/REDTEAM_PROTOTYPE_HMI.md` are closed or explicitly accepted.
+2. dummy physical I/O bench completed before real output wiring;
+3. every legacy SP01 field wire physically traced;
+4. all eight coil/contactor loads measured;
+5. TLB calibration workflow completed and verification recorded;
+6. TLB end-to-end weight latency/filter delay measured;
+7. loss/staleness of TLB data forces bounded safe abort;
+8. AP/router power-off during every FSM state has **zero control effect**;
+9. browser/laptop disconnect has **zero control effect**;
+10. Wi-Fi reconnect storms do not violate the measured control timing budget;
+11. RF quality measured through a complete rotation, not only with machine stationary;
+12. calibration/configuration and event records survive temporary Wi-Fi loss;
+13. safety chain remains independent of ESP/Wi-Fi;
+14. rollback to legacy SP01 is documented and tested;
+15. numeric pass/fail thresholds are frozen before a test is used as evidence for live approval.
 
-## 20. Frozen v0.1 decision
+## 21. Frozen v0.1 decision
 
 ```text
 PROTOTYPE SCOPE      SP01 only
-CONTROLLER           ESP32-S3 / ESP-IDF / FreeRTOS
+FIRST I/O TARGET     dummy physical 24 V I/O harness
+CONTROLLER           ESP32-S3 / ESP-IDF / C++ / FreeRTOS
 WEIGHER              LAUMAS TLB485
+CALIBRATION          HMI-guided zero + 50 kg span + 20/50 kg verification
 LOCAL INPUTS         7 used + 1 spare DI
 LOCAL OUTPUTS        8 used DO
 OUTPUT EXPANSION     optional RS485, auxiliary only initially
@@ -508,11 +587,12 @@ LOCAL FIELDBUS       isolated RS485
 SUPERVISORY NETWORK  Wi-Fi
 STATIONARY NETWORK   1 dedicated AP/router
 HMI                  ESP-hosted web UI + laptop/browser
+24 V SUPPLY          assumed available; verify before real machine
 ETHERNET TO ROTOR    none
 CARBON BRUSH DATA    none
 SAFETY               existing independent hardwired/safety chain
 ```
 
-The v0.1 architectural test is simple:
+The v0.1 architectural test remains simple:
 
-> **Turn off the AP/router while SP01 is filling. The local controller must remain deterministic and transition to the correct safe local state exactly as if Wi-Fi never existed.**
+> **Turn off the AP/router while SP01 is running. The local controller must remain deterministic and transition correctly because Wi-Fi was never part of the control loop.**
