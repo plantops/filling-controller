@@ -22,18 +22,8 @@ public:
         inputs_.di[static_cast<std::size_t>(channel)] = value;
     }
 
-    [[nodiscard]] bool input(Di channel) const noexcept {
-        return inputs_.di[static_cast<std::size_t>(channel)];
-    }
-
     [[nodiscard]] const InputImage& read_inputs() const noexcept { return inputs_; }
-
     void commit_outputs(const OutputImage& image) noexcept { outputs_ = image; }
-
-    [[nodiscard]] bool output(Do channel) const noexcept {
-        return outputs_.channels[static_cast<std::size_t>(channel)];
-    }
-
     [[nodiscard]] const OutputImage& outputs() const noexcept { return outputs_; }
 
 private:
