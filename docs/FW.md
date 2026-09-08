@@ -105,5 +105,5 @@ No raw GPIO or raw Modbus write endpoint.
 main            current spec/docs
 fw-sp01-v0.1    active embedded firmware
 py-sim          simulator/reference
- debate          history/red-team
+debate          history/red-team
 ```
