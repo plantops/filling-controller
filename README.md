@@ -23,7 +23,7 @@ Wi-Fi is not in the control loop. Controller, weighing and I/O stay local to SP0
 ## Quick start — Linux amd64
 
 ```bash
-git switch fw-sp01-v0.1
+git switch main
 git pull --ff-only
 
 cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
@@ -61,10 +61,12 @@ Detailed firmware, HMI, parameter and flashing instructions: [`firmware/README.m
 
 | Branch | Purpose |
 |---|---|
-| `main` | current specification and integrated baseline |
-| `fw-sp01-v0.1` | active SP01 firmware integration |
+| `main` | current specification + integrated SP01 RC baseline |
+| `fw-sp01-v0.1` | SP01 firmware development branch; synced to the RC baseline |
 | `py-sim` | Python digital twin / replay / conformance reference |
 | `debate` | historical design discussion and red-team material |
+
+Current version marker: [`VERSION`](VERSION) = `0.1.0-rc1`.
 
 ## Current documents
 
