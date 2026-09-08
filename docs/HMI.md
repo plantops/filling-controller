@@ -10,6 +10,8 @@ There is no live Ethernet link across the rotating/stationary boundary.
 
 The controller must continue a safe filling/abort sequence if the browser, laptop, Wi-Fi link, AP/router, machine HMI, or historian disappears.
 
+The initial HMI should be mostly read-only. **Weighing calibration is the deliberate v0.1 exception:** a controlled service workflow is required to zero/span/verify the SP01 weighing chain before any useful hardware commissioning can occur.
+
 ## 1. v0.1 HMI topology
 
 ```text
@@ -134,6 +136,7 @@ TIMING      = state + I/O waveforms + weight/flow vs time/angle
 HISTORY     = bag/cycle performance and diagnostics
 FAULTS      = active/latched faults and causal context
 CONFIG      = controlled parameters and commissioning data
+SERVICE     = guarded commissioning/calibration functions
 ```
 
 All views must be generated from the same semantic machine model and event stream.
@@ -351,14 +354,19 @@ GET  /api/v1/cycles
 GET  /api/v1/faults
 GET  /api/v1/network
 GET  /api/v1/config
+GET  /api/v1/weighing
 POST /api/v1/commands/reset-fault
 POST /api/v1/config/apply
+POST /api/v1/weighing/zero
+POST /api/v1/weighing/check
+POST /api/v1/weighing/span
+POST /api/v1/weighing/calibration/save
 WS   /ws/live
 ```
 
 The browser never directly addresses GPIO, TLB registers, or Modbus coils.
 
-All writes pass through authorization, current-state checks and interlocks.
+All writes pass through authorization, current-state checks and interlocks. The endpoint names above are illustrative contracts, not permission to expose raw hardware operations.
 
 ## 14. Timing separation
 
@@ -399,7 +407,7 @@ Suggested roles:
 ```text
 VIEWER    read only
 OPERATOR  limited normal commands
-ENGINEER  controlled recipe/config changes
+ENGINEER  controlled recipe/config/calibration changes
 SERVICE   commissioning/I-O tests/firmware/network diagnostics
 ```
 
@@ -435,6 +443,8 @@ The following must have no adverse local control effect:
 
 The controller may report communications warnings and HMI staleness, but the control FSM remains local.
 
+During a calibration transaction, Wi-Fi/browser loss must leave either the previous known-good calibration or a fully committed new calibration; never an ambiguous half-applied state.
+
 ## 18. Security minimums
 
 Before plant-network connection:
@@ -466,7 +476,7 @@ Before live SP01 control:
 7. verify local history persists through network outage;
 8. open multiple clients and measure control jitter;
 9. force controlled reconnect storms and prove control task is unaffected;
-10. interrupt configuration writes and verify atomic recovery;
+10. interrupt configuration/calibration writes and verify atomic recovery;
 11. verify unauthorized writes are rejected;
 12. verify service output forces clear on disconnect/reset/timeout;
 13. verify timing and causality use controller timestamps, not browser timestamps;
@@ -504,3 +514,39 @@ Safety      = independent hardwired/safety architecture
 The critical test is:
 
 > **Unplug the AP/router. SP01 must continue to behave correctly because the network was never part of the control loop.**
+
+## 22. Weighing calibration — required v0.1 service UI
+
+See `docs/WEIGHING_CALIBRATION.md` for the authoritative workflow.
+
+The normal commissioning sequence is:
+
+```text
+empty saddle → SET ZERO
+20 kg known reference → CHECK
+50 kg standard → SET SPAN
+remove weight → VERIFY ZERO
+20 kg → VERIFY
+50 kg → VERIFY
+SAVE + LOCK
+```
+
+Calibration actions are allowed only when the node is in a safe calibration/service state, automatic filling is disabled, all filling outputs are safe, TLB data is fresh/healthy and the measured weight is stable.
+
+`ZERO`, `TARE`, and `CALIBRATION` must remain visibly separate concepts in the UI.
+
+The browser never writes raw TLB register addresses. The service path is:
+
+```text
+Web UI
+  ↓
+CalibrationService
+  ↓
+WeighingUnit
+  ↓
+TLB adapter
+  ↓
+TLB485
+```
+
+Each completed calibration produces an append-only calibration/audit record and preserves the prior known-good calibration reference.
