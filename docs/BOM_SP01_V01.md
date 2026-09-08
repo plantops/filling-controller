@@ -22,9 +22,9 @@ Current assumptions:
 
 | Item | Qty | Procurement status | Purpose / requirement |
 |---|---:|---|---|
-| ESP32-S3 controller carrier with 8 isolated DI, 8 protected DO, isolated RS485, Wi-Fi and external antenna support | 1 | BUY | SP01 controller prototype |
-| LAUMAS TLB485 RS485 weighing transmitter | 1 | BUY | load-cell excitation, A/D, calibration/filtering, weight/status |
-| Dedicated 2.4 GHz Wi-Fi AP/router | 1 | BUY | stationary supervisory network only |
+| Waveshare `ESP32-S3-POE-ETH-8DI-8DO` prototype carrier, or exact approved equivalent | 1 | BUY | SP01 controller prototype; 8 isolated DI, 8 protected DO, isolated RS485, Wi-Fi/external antenna support required |
+| LAUMAS `TLB485` RS485 weighing transmitter | 1 | BUY | load-cell excitation, A/D, calibration/filtering, weight/status |
+| Dedicated 2.4 GHz Wi-Fi AP/router; Archer C64-class acceptable for bench/RF prototype | 1 | BUY | stationary supervisory network only |
 | External 2.4 GHz antenna + suitable pigtail/connector | 1 + 1 spare | BUY | rotating steel-machine RF testing |
 | USB-RS485 engineering adapter | 1 | BUY | independent TLB diagnostics/commissioning |
 | Shielded twisted-pair RS485 cable | 5–10 m | BUY | local ESP↔TLB bench/rotor wiring |
@@ -154,3 +154,14 @@ H6  only then consider x8 replication
 ## 7. Evidence to retain with the BOM
 
 Record actual manufacturer/variant, supplier, serial number where applicable, purchase date, firmware/hardware revision and measured electrical characteristics. The BOM should evolve from a budget list into an as-built record for SP01.
+
+## 8. Official hardware references
+
+| Item | Official product/document source |
+|---|---|
+| Waveshare `ESP32-S3-POE-ETH-8DI-8DO` | https://www.waveshare.com/esp32-s3-poe-eth-8di-8do.htm |
+| Waveshare wiki / hardware documentation | https://www.waveshare.com/wiki/ESP32-S3-POE-ETH-8DI-8DO |
+| LAUMAS `TLB485` | https://www.laumas.com/en/product/tlb-485-digital-weight-transmitter-rs485/ |
+| TP-Link Archer C64 support/manuals | https://www.tp-link.com/vn/support/download/archer-c64/v1/ |
+
+Hardware/manual/photo indexing is maintained under [`../hardware/README.md`](../hardware/README.md). Verify the exact purchased hardware revision against the manual before wiring or firmware assumptions are frozen.
