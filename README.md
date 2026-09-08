@@ -20,6 +20,24 @@ ESP32-S3 / ESP-IDF / C++ / FreeRTOS
 
 Wi-Fi is not in the control loop. Controller, weighing and I/O stay local to SP01.
 
+## Current status
+
+Version: [`VERSION`](VERSION) = **`0.1.0-rc1`**.
+
+Software baseline is **READY FOR BENCH**:
+
+- shared C++17 controller core builds/tests on Linux amd64;
+- ESP32-S3 firmware builds with ESP-IDF v5.5.5;
+- MANUAL fill-only mode implemented;
+- AUTO continuous cycle implemented;
+- dual discharge-reference A/B timing implemented and host-tested at different simulated rotor speeds;
+- Waveshare 8DI/8DO adapter, TLB485 layer, ESP web HMI and calibration service compile successfully;
+- `main` is the integrated RC baseline.
+
+Physical gates are still pending. No real machine authority is implied by this RC.
+
+See [`progress.md`](progress.md) for the gate-by-gate status and next actions.
+
 ## Quick start — Linux amd64
 
 ```bash
@@ -66,10 +84,9 @@ Detailed firmware, HMI, parameter and flashing instructions: [`firmware/README.m
 | `py-sim` | Python digital twin / replay / conformance reference |
 | `debate` | historical design discussion and red-team material |
 
-Current version marker: [`VERSION`](VERSION) = `0.1.0-rc1`.
-
 ## Current documents
 
+- [`progress.md`](progress.md) — current RC status, gates and next actions
 - [`spec/SP01.md`](spec/SP01.md) — canonical SP01 sequence and I/O
 - [`docs/HW.md`](docs/HW.md) — prototype wiring and architecture
 - [`docs/BOM.md`](docs/BOM.md) — one-node procurement list
