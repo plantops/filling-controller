@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,15 +34,15 @@ h1{font-size:22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minma
 </style></head><body>
 <h1>SP01 Filling Controller</h1><div id="offline">Connecting / Đang kết nối…</div>
 <div class="grid">
-<div class="card"><b>Status / Trạng thái</b><table><tr><td>State</td><td id="state">-</td></tr><tr><td>Fault</td><td id="fault">-</td></tr><tr><td>Cycle</td><td id="cycle">-</td></tr><tr><td>Weight / Khối lượng</td><td id="weight">-</td></tr><tr><td>Stable</td><td id="stable">-</td></tr></table></div>
+<div class="card"><b>Status / Trạng thái</b><table><tr><td>Mode</td><td id="mode">-</td></tr><tr><td>State</td><td id="state">-</td></tr><tr><td>Fault</td><td id="fault">-</td></tr><tr><td>Cycle</td><td id="cycle">-</td></tr><tr><td>Weight / Khối lượng</td><td id="weight">-</td></tr><tr><td>Stable</td><td id="stable">-</td></tr></table></div>
 <div class="card"><b>I/O</b><table id="io"></table></div>
-<div class="card"><b>Calibration / Hiệu chuẩn</b><p>Service ready: <b id="svc">NO</b></p><button onclick="zero()">SET ZERO</button><br><button onclick="check(20)">CHECK 20 kg</button><span id="c20"></span><br><button onclick="span50()">SET SPAN 50 kg</button><br><button onclick="check(50)">VERIFY 50 kg</button><span id="c50"></span><p><small>Calibration writes require DI8 service enable, machine permissive OFF, stable weight, and service token.</small></p></div>
+<div class="card"><b>Calibration / Hiệu chuẩn</b><p>Service ready: <b id="svc">NO</b></p><button onclick="zero()">SET ZERO</button><br><button onclick="check(20)">CHECK 20 kg</button><span id="c20"></span><br><button onclick="span50()">SET SPAN 50 kg</button><br><button onclick="check(50)">VERIFY 50 kg</button><span id="c50"></span><p><small>Calibration writes require machine stopped, fill switch OFF, all outputs safe, fresh stable weight, calibration writes enabled, and service token.</small></p></div>
 <div class="card"><b>Diagnostics / Chẩn đoán</b><pre id="diag">-</pre></div>
 </div>
 <script>
 let last=null,token=sessionStorage.getItem('sp01token')||'';
 function bits(v){let s='';for(let i=0;i<8;i++)s+=`<tr><td>DI${i+1}</td><td class="${v.di&(1<<i)?'on':''}">${v.di&(1<<i)?'ON':'OFF'}</td><td>DO${i+1}</td><td class="${v.do&(1<<i)?'on':''}">${v.do&(1<<i)?'ON':'OFF'}</td></tr>`;return s}
-async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;last=await r.json();offline.textContent='LIVE';state.textContent=last.state;fault.textContent=last.fault;cycle.textContent=last.cycle;weight.textContent=last.weight.toFixed(3)+' kg';stable.textContent=last.stable?'YES':'NO';svc.textContent=last.service_ready?'YES':'NO';io.innerHTML=bits(last);diag.textContent=`quality=${last.quality}\nTLB polls=${last.tlb_polls}\nTLB errors=${last.tlb_errors}\nTLB last=${last.tlb_last_error}`;}catch(e){offline.textContent='OFFLINE / MẤT KẾT NỐI'}setTimeout(poll,250)}
+async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;last=await r.json();offline.textContent='LIVE';mode.textContent=last.mode;state.textContent=last.state;fault.textContent=last.fault;cycle.textContent=last.cycle;weight.textContent=last.weight.toFixed(3)+' kg';stable.textContent=last.stable?'YES':'NO';svc.textContent=last.service_ready?'YES':'NO';io.innerHTML=bits(last);diag.textContent=`quality=${last.quality}\nTLB polls=${last.tlb_polls}\nTLB errors=${last.tlb_errors}\nTLB last=${last.tlb_last_error}`;}catch(e){offline.textContent='OFFLINE / MẤT KẾT NỐI'}setTimeout(poll,250)}
 function auth(){if(!token){token=prompt('Service token')||'';sessionStorage.setItem('sp01token',token)}return {'X-Service-Token':token}}
 async function post(path,body=''){const r=await fetch(path,{method:'POST',headers:{...auth(),'Content-Type':'text/plain'},body});const t=await r.text();alert(r.status+' '+t);if(r.status===401||r.status===403){token='';sessionStorage.removeItem('sp01token')}}
 function zero(){post('/api/cal/zero')}
@@ -79,17 +80,18 @@ esp_err_t root_handler(httpd_req_t* req) noexcept {
 }
 
 esp_err_t state_handler(httpd_req_t* req) noexcept {
-    if (!g_snapshot_fn) return httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "status unavailable");
+    if (!g_snapshot_fn) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
     HmiSnapshot s{};
-    if (!g_snapshot_fn(s)) return httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "status unavailable");
-    char json[512]{};
+    if (!g_snapshot_fn(s)) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
+    char json[576]{};
     std::snprintf(json, sizeof(json),
-                  "{\"state\":\"%s\",\"fault\":\"%s\",\"cycle\":%u,\"weight\":%.3f,"
+                  "{\"mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\",\"cycle\":%" PRIu32 ",\"weight\":%.3f,"
                   "\"stable\":%s,\"quality\":%u,\"di\":%u,\"do\":%u,\"service_ready\":%s,"
-                  "\"tlb_polls\":%u,\"tlb_errors\":%u,\"tlb_last_error\":%d}",
-                  state_name(s.controller.state), fault_name(s.controller.fault), s.controller.cycle_id,
-                  static_cast<double>(s.weight.net_kg), s.weight.stable ? "true" : "false",
-                  static_cast<unsigned>(s.weight.quality), pack_inputs(s.inputs), pack_outputs(s.controller.outputs),
+                  "\"tlb_polls\":%" PRIu32 ",\"tlb_errors\":%" PRIu32 ",\"tlb_last_error\":%d}",
+                  mode_name(s.controller.mode), state_name(s.controller.state), fault_name(s.controller.fault),
+                  s.controller.cycle_id, static_cast<double>(s.weight.net_kg),
+                  s.weight.stable ? "true" : "false", static_cast<unsigned>(s.weight.quality),
+                  static_cast<unsigned>(pack_inputs(s.inputs)), static_cast<unsigned>(pack_outputs(s.controller.outputs)),
                   s.service_ready ? "true" : "false", s.tlb.polls_ok, s.tlb.comm_errors,
                   static_cast<int>(s.tlb.last_error));
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -194,8 +196,8 @@ esp_err_t web_hmi_start(const WebHmiConfig& config,
     if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) return err;
     if ((err = esp_wifi_set_config(WIFI_IF_STA, &sta)) != ESP_OK) return err;
     if ((err = esp_wifi_start()) != ESP_OK) return err;
-    esp_wifi_set_ps(WIFI_PS_NONE);
-    esp_wifi_connect();
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    (void)esp_wifi_connect();
 
     ESP_RETURN_ON_ERROR(start_http(), kTag, "HTTP start");
     ESP_LOGI(kTag, "HMI started; Wi-Fi STA connecting to %s", config.ssid);
