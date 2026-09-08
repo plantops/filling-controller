@@ -1,0 +1,26 @@
+name: fw-host
+
+on:
+  push:
+    branches: [fw-sp01-v0.1]
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/fw-host.yml'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/fw-host.yml'
+
+jobs:
+  linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/host --parallel
+      - name: Test
+        run: ctest --test-dir build/host --output-on-failure
+      - name: Smoke
+        run: ./build/host/sp01_host

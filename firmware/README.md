@@ -6,7 +6,8 @@ Current status:
 
 ```text
 M0 scaffold committed
-G0 clean ESP-IDF build pending
+S1 native Linux amd64 harness committed
+G0 ESP-IDF build pending
 ```
 
 Architecture:
@@ -29,18 +30,37 @@ Hard rules:
 
 Implementation order follows [`../docs/FW.md`](../docs/FW.md): M0 -> M9 / G0 -> G9.
 
+## Native Linux amd64
+
+The host harness uses the same C++ semantic model as ESP firmware.
+
+```bash
+cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host --parallel
+ctest --test-dir build/host --output-on-failure
+./build/host/sp01_host
+```
+
+Host adapters currently provide:
+
+```text
+ManualClock
+VirtualIo
+VirtualWeigher
+```
+
+This is the base for deterministic FSM/conformance simulation. It does not emulate ESP peripherals or the electrical behavior of the Waveshare board.
+
 ## M0 scaffold
 
 ```text
-firmware/esp32-s3/
-  CMakeLists.txt
-  main/
+firmware/
+  host/                 native Linux amd64 harness
+  esp32-s3/
     CMakeLists.txt
-    app_main.cpp
-  components/
-    controller/
-      CMakeLists.txt
-      include/sp01/model.hpp
+    main/
+    components/
+      controller/
 ```
 
-M0 intentionally contains no physical GPIO writes and no guessed timing constants. It establishes the semantic SP01 model and an ESP-IDF build target first.
+M0 contains no physical GPIO writes and no guessed machine timing constants.
