@@ -22,14 +22,23 @@ public:
 private:
     ControllerConfig config_{};
     ControllerSnapshot snapshot_{};
+
     bool fill_position_armed_{false};
-    bool push_position_armed_{false};
+    bool discharge_a_armed_{false};
+    bool discharge_b_armed_{false};
+    bool discharge_have_a_{false};
+    bool discharge_scheduled_{false};
+    std::uint64_t discharge_a_us_{0};
 
     void transition(State next, std::uint64_t now_us) noexcept;
     void fault(Fault code, std::uint64_t now_us) noexcept;
     [[nodiscard]] bool timed_out(std::uint64_t now_us, std::uint64_t timeout_us) const noexcept;
     [[nodiscard]] bool weight_fresh(std::uint64_t now_us, const WeightSnapshot& weight) const noexcept;
     [[nodiscard]] OutputImage outputs_for_state() const noexcept;
+
+    void arm_discharge(const InputImage& inputs) noexcept;
+    [[nodiscard]] bool update_discharge(std::uint64_t now_us,
+                                        const InputImage& inputs) noexcept;
 };
 
 }  // namespace sp01
