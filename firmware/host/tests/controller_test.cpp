@@ -1,221 +1,287 @@
 #include "sp01/controller.hpp"
+#include "sp01/host_sim.hpp"
 
-#include <cstdio>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 
-#define REQUIRE(expr) do { \
-    if (!(expr)) { \
-        std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #expr); \
-        std::abort(); \
-    } \
-} while (false)
+#define REQUIRE(expr) do { if (!(expr)) std::abort(); } while (false)
 
 namespace {
 
-using namespace sp01;
+using sp01::Di;
+using sp01::Do;
+using sp01::Fault;
+using sp01::OperationMode;
+using sp01::State;
+using sp01::WeightQuality;
 
-struct Rig {
-    InputImage in{};
-    WeightSnapshot weight{};
-    std::uint64_t now_us{0};
-
-    void set(Di channel, bool value) {
-        in.di[static_cast<std::size_t>(channel)] = value;
-    }
-
-    void set_weight(float kg,
-                    bool stable = false,
-                    WeightQuality quality = WeightQuality::Good) {
-        weight.net_kg = kg;
-        weight.stable = stable;
-        weight.quality = quality;
-        weight.sample_time_us = now_us;
-        ++weight.sequence;
-    }
-};
-
-void set_permissive(Rig& rig, bool value = true) {
-    rig.set(Di::HopperFeederRunning, value);
-    rig.set(Di::DownstreamConveyorReady, value);
-    rig.set(Di::MachineMotorRunning, value);
-    rig.set(Di::ProcessInitiative, value);
+void set_auto_permissive(sp01::host::VirtualIo& io, bool value = true) {
+    io.set_input(Di::HopperFeederRunning, value);
+    io.set_input(Di::DownstreamConveyorReady, value);
+    io.set_input(Di::MachineMotorRunning, value);
+    io.set_input(Di::ProcessInitiative, value);
 }
 
-ControllerSnapshot tick(Controller& controller,
-                        Rig& rig,
-                        std::uint64_t advance_us = 10000) {
-    rig.now_us += advance_us;
-    if (rig.weight.quality == WeightQuality::Good) {
-        rig.weight.sample_time_us = rig.now_us;
-    }
-    return controller.tick(rig.now_us, rig.in, rig.weight);
+void publish(sp01::host::VirtualWeigher& w,
+             const sp01::host::ManualClock& c,
+             float kg,
+             bool stable = false,
+             WeightQuality quality = WeightQuality::Good) {
+    w.publish(kg, stable, quality, c.now_us());
 }
 
-void advance_to_wait_discharge(Controller& controller, Rig& rig) {
-    set_permissive(rig);
-    rig.set_weight(0.0F, true);
-
-    auto snapshot = controller.tick(rig.now_us, rig.in, rig.weight);
-    REQUIRE(snapshot.state == State::WaitFillPosition);
-
-    rig.set(Di::FillPosition, true);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::BagAcquire);
-
-    rig.set(Di::BagPresent, true);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::BagVerify);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::TareReady);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::CoarseFill);
-
-    rig.set_weight(40.0F);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::FineFill);
-
-    rig.set_weight(50.0F);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::Cutoff);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::Settle);
-
-    rig.set_weight(50.0F, true);
-    snapshot = tick(controller, rig, 100000);
-    REQUIRE(snapshot.state == State::WaitDischarge);
+sp01::ControllerSnapshot tick(sp01::Controller& ctl,
+                              sp01::host::ManualClock& c,
+                              sp01::host::VirtualIo& io,
+                              sp01::host::VirtualWeigher& w,
+                              std::uint64_t advance_us = 10000) {
+    c.advance_us(advance_us);
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    io.commit_outputs(s.outputs);
+    return s;
 }
 
-void speed_adaptive_discharge(std::uint64_t a_to_b_us,
-                              std::uint64_t expected_delay_after_b_us) {
-    ControllerConfig config;
-    config.settle_min_us = 100000;
-    config.push_duration_us = 100000;
-    config.discharge_ref_span_deg = 10.0F;
-    config.discharge_target_after_b_deg = 5.0F;
-    config.discharge_actuator_delay_us = 10000;
+sp01::ControllerSnapshot enter_auto_coarse(sp01::Controller& ctl,
+                                           sp01::host::ManualClock& c,
+                                           sp01::host::VirtualIo& io,
+                                           sp01::host::VirtualWeigher& w) {
+    io.set_mode(OperationMode::Auto);
+    set_auto_permissive(io);
+    publish(w, c, 0.0F, true);
 
-    Controller controller(config);
-    Rig rig;
-    advance_to_wait_discharge(controller, rig);
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    REQUIRE(s.state == State::WaitFillPosition);
 
-    rig.set(Di::DischargeRefA, false);
-    rig.set(Di::DischargeRefB, false);
-    tick(controller, rig);
+    io.set_input(Di::FillPosition, false);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::WaitFillPosition);
 
-    rig.set(Di::DischargeRefA, true);
-    auto snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::WaitDischarge);
+    io.set_input(Di::FillPosition, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::BagAcquire);
 
-    rig.set(Di::DischargeRefA, false);
-    if (a_to_b_us > 10000) {
-        tick(controller, rig, a_to_b_us - 10000);
-    }
+    io.set_input(Di::BagPresent, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::BagVerify);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::TareReady);
 
-    rig.set(Di::DischargeRefB, true);
-    snapshot = tick(controller, rig, 10000);
-
-    REQUIRE(snapshot.state == State::WaitDischarge);
-    REQUIRE(snapshot.discharge_ref_interval_us == a_to_b_us);
-    REQUIRE(snapshot.discharge_command_due_us - rig.now_us ==
-            expected_delay_after_b_us);
-
-    if (expected_delay_after_b_us > 0) {
-        snapshot = tick(controller, rig, expected_delay_after_b_us - 1);
-        REQUIRE(snapshot.state == State::WaitDischarge);
-        snapshot = tick(controller, rig, 1);
-    }
-
-    REQUIRE(snapshot.state == State::Push);
-    REQUIRE(output(snapshot.outputs, Do::BagPush));
+    publish(w, c, 0.0F, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::CoarseFill);
+    return s;
 }
 
-void invalid_geometry_rejected() {
-    ControllerConfig config;
-    config.settle_min_us = 100000;
-    config.discharge_ref_span_deg = 15.0F;
-    config.discharge_target_after_b_deg = 0.0F;
-    config.discharge_actuator_delay_us = 10000;
+sp01::ControllerSnapshot finish_to_auto_discharge(sp01::Controller& ctl,
+                                                   sp01::host::ManualClock& c,
+                                                   sp01::host::VirtualIo& io,
+                                                   sp01::host::VirtualWeigher& w) {
+    publish(w, c, 40.0F);
+    auto s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::FineFill);
 
-    Controller controller(config);
-    Rig rig;
-    advance_to_wait_discharge(controller, rig);
+    publish(w, c, 50.0F);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Cutoff);
+    REQUIRE(!sp01::output(s.outputs, Do::FillingMotor));
+    REQUIRE(!sp01::output(s.outputs, Do::SpoutAeration));
 
-    rig.set(Di::DischargeRefA, false);
-    rig.set(Di::DischargeRefB, false);
-    tick(controller, rig);
-    rig.set(Di::DischargeRefA, true);
-    tick(controller, rig);
-    rig.set(Di::DischargeRefA, false);
-    tick(controller, rig, 80000);
-    rig.set(Di::DischargeRefB, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Settle);
 
-    const auto snapshot = tick(controller, rig, 10000);
-    REQUIRE(snapshot.state == State::Fault);
-    REQUIRE(snapshot.fault == Fault::DischargeTimingInvalid);
-    REQUIRE(all_outputs_off(snapshot.outputs));
+    publish(w, c, 50.0F, true);
+    s = tick(ctl, c, io, w, 100000);
+    REQUIRE(s.state == State::WaitDischarge);
+    return s;
 }
 
-void stale_weight_fault() {
-    ControllerConfig config;
-    config.weight_stale_us = 100000;
-    Controller controller(config);
-    Rig rig;
+void normal_auto_cycle() {
+    sp01::ControllerConfig cfg;
+    cfg.settle_min_us = 100000;
+    cfg.push_duration_us = 100000;
+    cfg.discharge_countdown_counts = 1000;
+    cfg.discharge_lead_counts = 0;
 
-    set_permissive(rig);
-    rig.set_weight(0.0F, true);
-    auto snapshot = controller.tick(rig.now_us, rig.in, rig.weight);
-    REQUIRE(snapshot.state == State::WaitFillPosition);
+    sp01::Controller ctl(cfg);
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
 
-    rig.set(Di::FillPosition, true);
-    tick(controller, rig);
-    rig.set(Di::BagPresent, true);
-    tick(controller, rig);
-    tick(controller, rig);
+    auto s = enter_auto_coarse(ctl, c, io, w);
+    REQUIRE(sp01::output(s.outputs, Do::DosingValveA));
+    REQUIRE(sp01::output(s.outputs, Do::DosingValveB));
+    REQUIRE(sp01::output(s.outputs, Do::DosingValveC));
 
-    rig.now_us += 200000;
-    snapshot = controller.tick(rig.now_us, rig.in, rig.weight);
-    REQUIRE(snapshot.state == State::Fault);
-    REQUIRE(snapshot.fault == Fault::WeightStale);
-    REQUIRE(all_outputs_off(snapshot.outputs));
+    s = finish_to_auto_discharge(ctl, c, io, w);
+
+    io.set_input(Di::DischargeRefA, true);
+    s = tick(ctl, c, io, w, 10000);
+    REQUIRE(s.state == State::WaitDischarge);
+
+    io.set_input(Di::DischargeRefA, false);
+    tick(ctl, c, io, w, 10000);
+
+    io.set_input(Di::DischargeRefB, true);
+    s = tick(ctl, c, io, w, 90000);
+    REQUIRE(s.discharge_ref_interval_us == 100000);
+    REQUIRE(s.discharge_due_us == c.now_us() + 100000);
+    REQUIRE(s.state == State::WaitDischarge);
+
+    io.set_input(Di::DischargeRefB, false);
+    s = tick(ctl, c, io, w, 100000);
+    REQUIRE(s.state == State::Push);
+    REQUIRE(sp01::output(s.outputs, Do::BagPush));
+
+    s = tick(ctl, c, io, w, 100000);
+    REQUIRE(s.state == State::Complete);
+    REQUIRE(sp01::all_outputs_off(s.outputs));
+    REQUIRE(s.cycle_id == 1);
 }
 
-void permissive_loss_fault() {
-    ControllerConfig config;
-    config.discharge_ref_span_deg = 10.0F;
-    config.discharge_target_after_b_deg = 5.0F;
-    Controller controller(config);
-    Rig rig;
+std::uint64_t measured_countdown(std::uint64_t ab_interval_us) {
+    sp01::ControllerConfig cfg;
+    cfg.settle_min_us = 100000;
+    cfg.discharge_countdown_counts = 1000;
+    cfg.discharge_lead_counts = 100;
 
-    set_permissive(rig);
-    rig.set_weight(0.0F, true);
-    const auto first = controller.tick(rig.now_us, rig.in, rig.weight);
-    REQUIRE(first.state == State::WaitFillPosition);
+    sp01::Controller ctl(cfg);
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
 
-    rig.set(Di::FillPosition, true);
-    tick(controller, rig);
-    rig.set(Di::BagPresent, true);
-    tick(controller, rig);
-    tick(controller, rig);
+    enter_auto_coarse(ctl, c, io, w);
+    finish_to_auto_discharge(ctl, c, io, w);
 
-    auto snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::CoarseFill);
+    io.set_input(Di::DischargeRefA, true);
+    auto s = tick(ctl, c, io, w, 10000);
+    REQUIRE(s.state == State::WaitDischarge);
+    const auto a_time = c.now_us();
 
-    rig.set(Di::ProcessInitiative, false);
-    rig.set_weight(5.0F);
-    snapshot = tick(controller, rig);
-    REQUIRE(snapshot.state == State::Fault);
-    REQUIRE(snapshot.fault == Fault::PermissiveLost);
-    REQUIRE(all_outputs_off(snapshot.outputs));
+    io.set_input(Di::DischargeRefA, false);
+    tick(ctl, c, io, w, 10000);
+
+    io.set_input(Di::DischargeRefB, true);
+    const auto remaining = ab_interval_us - 10000;
+    s = tick(ctl, c, io, w, remaining);
+    REQUIRE(s.discharge_ref_interval_us == ab_interval_us);
+    REQUIRE(c.now_us() - a_time == ab_interval_us);
+    return s.discharge_due_us - c.now_us();
+}
+
+void discharge_tracks_speed() {
+    REQUIRE(measured_countdown(100000) == 90000);
+    REQUIRE(measured_countdown(50000) == 45000);
+}
+
+void manual_fill_without_rotation_or_push() {
+    sp01::ControllerConfig cfg;
+    cfg.settle_min_us = 100000;
+    sp01::Controller ctl(cfg);
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
+
+    io.set_mode(OperationMode::Manual);
+    io.set_input(Di::HopperFeederRunning, true);
+    io.set_input(Di::DownstreamConveyorReady, false);
+    io.set_input(Di::MachineMotorRunning, false);
+    io.set_input(Di::ProcessInitiative, false);
+    publish(w, c, 0.0F, true);
+
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    REQUIRE(s.mode == OperationMode::Manual);
+    REQUIRE(s.state == State::WaitPermissive);
+
+    io.set_input(Di::ProcessInitiative, true);  // physical manual ON/OFF switch
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::BagAcquire);
+    REQUIRE(sp01::output(s.outputs, Do::ScannerDown));
+    REQUIRE(!sp01::output(s.outputs, Do::BagPush));
+
+    io.set_input(Di::BagPresent, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::BagVerify);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::TareReady);
+
+    publish(w, c, 0.0F, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::CoarseFill);
+    REQUIRE(!sp01::output(s.outputs, Do::BagPush));
+
+    publish(w, c, 40.0F);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::FineFill);
+
+    publish(w, c, 50.0F);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Cutoff);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Settle);
+
+    publish(w, c, 50.0F, true);
+    s = tick(ctl, c, io, w, 100000);
+    REQUIRE(s.state == State::Complete);
+    REQUIRE(sp01::all_outputs_off(s.outputs));
+    REQUIRE(!sp01::output(s.outputs, Do::BagPush));
+
+    // ON stays latched complete: no automatic second fill.
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Complete);
+
+    io.set_input(Di::ProcessInitiative, false);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::WaitPermissive);
+}
+
+void manual_off_stops_fill_cleanly() {
+    sp01::Controller ctl;
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
+
+    io.set_mode(OperationMode::Manual);
+    io.set_input(Di::HopperFeederRunning, true);
+    io.set_input(Di::ProcessInitiative, true);
+    publish(w, c, 0.0F, true);
+
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    REQUIRE(s.state == State::BagAcquire);
+    io.set_input(Di::BagPresent, true);
+    tick(ctl, c, io, w);
+    tick(ctl, c, io, w);
+    publish(w, c, 0.0F, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::CoarseFill);
+
+    io.set_input(Di::ProcessInitiative, false);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::WaitPermissive);
+    REQUIRE(s.fault == Fault::None);
+    REQUIRE(sp01::all_outputs_off(s.outputs));
+}
+
+void mode_change_during_fill_faults_safe() {
+    sp01::Controller ctl;
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
+
+    enter_auto_coarse(ctl, c, io, w);
+    io.set_mode(OperationMode::Manual);
+    const auto s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Fault);
+    REQUIRE(s.fault == Fault::ModeChanged);
+    REQUIRE(sp01::all_outputs_off(s.outputs));
 }
 
 }  // namespace
 
 int main() {
-    speed_adaptive_discharge(100000, 40000);
-    speed_adaptive_discharge(50000, 15000);
-    invalid_geometry_rejected();
-    stale_weight_fault();
-    permissive_loss_fault();
+    normal_auto_cycle();
+    discharge_tracks_speed();
+    manual_fill_without_rotation_or_push();
+    manual_off_stops_fill_cleanly();
+    mode_change_during_fill_faults_safe();
     return 0;
 }

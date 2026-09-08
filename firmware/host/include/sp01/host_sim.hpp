@@ -18,12 +18,24 @@ private:
 
 class VirtualIo {
 public:
+    void set_mode(OperationMode mode) noexcept { inputs_.mode = mode; }
+
     void set_input(Di channel, bool value) noexcept {
         inputs_.di[static_cast<std::size_t>(channel)] = value;
     }
 
+    [[nodiscard]] bool input_value(Di channel) const noexcept {
+        return inputs_.di[static_cast<std::size_t>(channel)];
+    }
+
     [[nodiscard]] const InputImage& read_inputs() const noexcept { return inputs_; }
+
     void commit_outputs(const OutputImage& image) noexcept { outputs_ = image; }
+
+    [[nodiscard]] bool output_value(Do channel) const noexcept {
+        return outputs_.channels[static_cast<std::size_t>(channel)];
+    }
+
     [[nodiscard]] const OutputImage& outputs() const noexcept { return outputs_; }
 
 private:

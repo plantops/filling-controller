@@ -6,6 +6,11 @@
 
 namespace sp01 {
 
+enum class OperationMode : std::uint8_t {
+    Auto,
+    Manual,
+};
+
 enum class State : std::uint8_t {
     WaitPermissive,
     WaitFillPosition,
@@ -30,8 +35,9 @@ enum class Fault : std::uint8_t {
     WeightStale,
     WeightFault,
     StateTimeout,
-    DischargeTimingInvalid,
     IoFault,
+    DischargeTimingInvalid,
+    ModeChanged,
 };
 
 enum class Di : std::size_t {
@@ -65,6 +71,7 @@ enum class WeightQuality : std::uint8_t {
 
 struct InputImage {
     std::array<bool, 8> di{};
+    OperationMode mode{OperationMode::Auto};
 };
 
 struct OutputImage {
@@ -92,24 +99,21 @@ struct ControllerConfig {
     std::uint64_t wait_discharge_timeout_us{6000000};
     std::uint64_t push_duration_us{500000};
 
-    // Relative geometry. Actual installation angles are commissioning data.
-    // ref_span_deg: sensor A -> sensor B.
-    // target_after_b_deg: sensor B -> physical optimum discharge point.
-    float discharge_ref_span_deg{0.0F};
-    float discharge_target_after_b_deg{0.0F};
-
-    // Measured command -> physical bag release delay.
-    std::uint64_t discharge_actuator_delay_us{0};
+    // A->B is normalized to 1000 counts. After B, countdown is
+    // discharge_countdown_counts - discharge_lead_counts.
+    std::uint32_t discharge_countdown_counts{1000};
+    std::uint32_t discharge_lead_counts{0};
 };
 
 struct ControllerSnapshot {
     State state{State::WaitPermissive};
     Fault fault{Fault::None};
+    OperationMode mode{OperationMode::Auto};
     OutputImage outputs{};
     std::uint64_t state_enter_us{0};
-    std::uint32_t cycle_id{0};
     std::uint64_t discharge_ref_interval_us{0};
-    std::uint64_t discharge_command_due_us{0};
+    std::uint64_t discharge_due_us{0};
+    std::uint32_t cycle_id{0};
 };
 
 constexpr OutputImage safe_output_image() noexcept { return {}; }
@@ -133,13 +137,19 @@ constexpr void set_output(OutputImage& image, Do channel, bool value) noexcept {
     image.channels[static_cast<std::size_t>(channel)] = value;
 }
 
-constexpr bool machine_permissive(const InputImage& image) noexcept {
+constexpr bool auto_permissive(const InputImage& image) noexcept {
     return input(image, Di::HopperFeederRunning) &&
            input(image, Di::DownstreamConveyorReady) &&
            input(image, Di::MachineMotorRunning) &&
            input(image, Di::ProcessInitiative);
 }
 
+constexpr bool manual_fill_requested(const InputImage& image) noexcept {
+    return input(image, Di::HopperFeederRunning) &&
+           input(image, Di::ProcessInitiative);
+}
+
+const char* mode_name(OperationMode mode) noexcept;
 const char* state_name(State state) noexcept;
 const char* fault_name(Fault fault) noexcept;
 
