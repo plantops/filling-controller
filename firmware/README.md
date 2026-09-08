@@ -24,12 +24,29 @@ Current code includes:
 
 ## Linux amd64
 
+Build and test the shared controller core:
+
 ```bash
 cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
 cmake --build build/host --parallel
 ctest --test-dir build/host --output-on-failure
 ./build/host/sp01_host
 ```
+
+Preview the HMI and current parameter set on any Linux amd64 node:
+
+```bash
+chmod +x firmware/host/serve-hmi.sh
+./firmware/host/serve-hmi.sh 8080
+```
+
+Then open:
+
+```text
+http://<linux-node-ip>:8080/
+```
+
+The host HMI is a **read-only mock preview** for UI/parameter review. It has no GPIO, Modbus or actuator authority and is not the production control loop. Current production values are configured in `menuconfig -> SP01 Filling Controller`.
 
 ## ESP32-S3 build / flash
 
