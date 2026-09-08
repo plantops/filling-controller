@@ -32,8 +32,10 @@ sp01::ControllerConfig make_controller_config() noexcept {
     c.coarse_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_COARSE_TIMEOUT_MS) * 1000ULL;
     c.fine_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_FINE_TIMEOUT_MS) * 1000ULL;
     c.settle_min_us = static_cast<std::uint64_t>(CONFIG_SP01_SETTLE_MIN_MS) * 1000ULL;
-    c.wait_push_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_WAIT_PUSH_TIMEOUT_MS) * 1000ULL;
+    c.wait_discharge_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_WAIT_DISCHARGE_TIMEOUT_MS) * 1000ULL;
     c.push_duration_us = static_cast<std::uint64_t>(CONFIG_SP01_PUSH_DURATION_MS) * 1000ULL;
+    c.discharge_countdown_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS);
+    c.discharge_lead_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_LEAD_COUNTS);
     return c;
 }
 
@@ -51,8 +53,10 @@ bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
     portEXIT_CRITICAL(&g_status_mux);
     out.weight = g_tlb->snapshot();
     out.tlb = g_tlb->diagnostics();
-    out.service_ready = sp01::input(out.inputs, sp01::Di::Spare) &&
-                        !sp01::machine_permissive(out.inputs) &&
+
+    const bool machine_stopped = !sp01::input(out.inputs, sp01::Di::MachineMotorRunning);
+    const bool fill_switch_off = !sp01::input(out.inputs, sp01::Di::ProcessInitiative);
+    out.service_ready = machine_stopped && fill_switch_off &&
                         out.controller.state == sp01::State::WaitPermissive &&
                         sp01::all_outputs_off(out.controller.outputs) &&
                         out.weight.stable && weight_fresh_now(out.weight);
@@ -74,8 +78,8 @@ esp_err_t hmi_cal_span(float kg) noexcept {
     return g_tlb->calibration_span(kg);
 }
 
-void weighing_task(void*) {
 #if CONFIG_SP01_TLB_ENABLE
+void weighing_task(void*) {
     TickType_t last = xTaskGetTickCount();
     for (;;) {
         const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
@@ -83,10 +87,8 @@ void weighing_task(void*) {
         if (err != ESP_OK) ESP_LOGD(kTag, "TLB poll: %s", esp_err_to_name(err));
         vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_TLB_POLL_MS));
     }
-#else
-    vTaskDelete(nullptr);
-#endif
 }
+#endif
 
 void control_task(void*) {
     (void)esp_task_wdt_add(nullptr);
@@ -104,6 +106,12 @@ void control_task(void*) {
             snapshot = g_controller->snapshot();
             (void)g_io->force_safe();
         } else {
+            // v0.1 derives operation mode locally from rotor state:
+            // stopped machine = MANUAL, rotating machine = AUTO.
+            inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
+                              ? sp01::OperationMode::Auto
+                              : sp01::OperationMode::Manual;
+
             const auto weight = g_tlb->snapshot();
             snapshot = g_controller->tick(now, inputs, weight);
             io_err = g_io->commit_outputs(snapshot.outputs);
