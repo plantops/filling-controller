@@ -160,7 +160,11 @@ extern "C" void app_main(void) {
     sp01::Tlb485Config tlb_cfg{};
     tlb_cfg.baud = CONFIG_SP01_TLB_BAUD;
     tlb_cfg.slave = CONFIG_SP01_TLB_SLAVE;
-    tlb_cfg.calibration_writes = CONFIG_SP01_TLB_CALIBRATION_WRITES;
+#if CONFIG_SP01_TLB_CALIBRATION_WRITES
+    tlb_cfg.calibration_writes = true;
+#else
+    tlb_cfg.calibration_writes = false;
+#endif
     ESP_ERROR_CHECK(tlb.init(tlb_cfg));
 #endif
 
