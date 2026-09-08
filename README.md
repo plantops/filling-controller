@@ -1,34 +1,49 @@
-# Filling Controller
+# Filling Controller — Python Simulator / Reference
 
-Universal, digital-twin-first bag filling controller.
+> **Branch status:** `py-sim` is the preserved Python digital twin, replay and conformance-reference implementation. It is **not** the candidate production controller for live SP01 hardware.
+>
+> Current hardware/FW direction lives on `main` and `fw-sp01-v0.1`.
 
-The permanent product is the machine behavior contract, not a specific implementation language. A machine profile, semantic signal model, state semantics, strategies, adapters, events, and conformance scenarios define behavior. Runtime implementations may be replaced by Python, Go, Rust, C, C++, PLC gateways, or other targets while retaining those contracts.
+Universal, digital-twin-first bag filling reference runtime.
 
-## Current scope
+The permanent product is the machine behavior contract, not a specific implementation language. A machine profile, semantic signal model, state semantics, strategies, adapters, events, and conformance scenarios define behavior.
 
-The first reference implementation models one filling unit (`SP01`) for a HAVER rotary packer pilot. It starts with simulated plant physics and soft sensors. Physical sensors and actuators can later be introduced through adapters without changing controller logic.
+## Role of this branch
+
+Use `py-sim` for:
+
+- simulated plant physics;
+- replay and fault reproduction;
+- algorithm experiments;
+- soft-sensor development;
+- prototype HMI work;
+- scenario generation;
+- conformance/oracle comparison with embedded firmware.
+
+Do **not** use this branch as evidence that ESP32 timing, watchdogs, local I/O, TLB/RS485, Wi-Fi isolation or live machine safety behavior have been validated.
+
+The design evolved after the bootstrap: production SP01 control is now targeted at ESP32-S3 with ESP-IDF/C++/FreeRTOS, local 24 V I/O and LAUMAS TLB485. See the current `main` README and `docs/EVOLUTION.md` there.
 
 ## Architectural rules
 
-1. Control logic never imports GPIO, HX711, Modbus, PLC, or simulator implementations.
+1. Control logic never imports GPIO, HX711, Modbus, PLC, or simulator implementations directly.
 2. All I/O is addressed by semantic signal names.
 3. Plant truth, sensor measurements, and controller estimates are separate domains.
-4. State transitions are deterministic and observable.
-5. Simulation and real hardware use the same controller interfaces.
+4. State transitions are deterministic and observable within the reference model.
+5. Simulation and hardware implementations should converge through common semantic interfaces and conformance scenarios.
 6. Hardware migration is channel-by-channel, with shadow comparison before authority transfer.
 7. Machine/vendor differences belong in profiles, capabilities, strategies, and adapters.
 8. Alternate runtimes must pass the same conformance scenarios before behavioral equivalence is claimed.
 
-## Bootstrap contents
+## Branch contents
 
-- `docs/ARCHITECTURE.md` — permanent layering and portability rules
+- `docs/ARCHITECTURE.md` — layering and portability rules
 - `docs/SPECIFICATION.md` — language-neutral packer model
 - `docs/ADAPTERS.md` — sim/hard/shadow adapter contract
 - `docs/SIMULATION.md` — filling physics model
-- `docs/ROADMAP.md` — staged hard-sensor migration
-- `spec/profiles/haver-rotary-pilot-sp01.yaml` — first machine profile
+- `spec/profiles/haver-rotary-pilot-sp01.yaml` — simulator profile
 - `src/filling_controller/` — Python reference runtime
-- `tests/test_cycle.py` — deterministic simulated-cycle conformance seed
+- `tests/test_cycle.py` — deterministic simulated-cycle test seed
 
 ## Run
 
@@ -52,7 +67,11 @@ filling-controller
 
 Open `http://127.0.0.1:8000`.
 
-The API is available at `http://127.0.0.1:8000/docs`.
+If port 8000 is occupied:
+
+```powershell
+python -m uvicorn filling_controller.api:app --host 127.0.0.1 --port 8010
+```
 
 ## Select another profile
 
@@ -74,4 +93,4 @@ FILLING_PROFILE=/path/to/profile.yaml filling-controller
 pytest -q
 ```
 
-The first deterministic scenario produces a completed 50 kg-class simulated bag while explicitly modeling gate lag, transport delay, sensor noise, and material in flight.
+The reference simulator remains useful for predictive-cutoff development and for generating deterministic scenarios to compare against the embedded SP01 controller.
