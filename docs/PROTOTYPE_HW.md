@@ -1,20 +1,131 @@
-# One-Spout Hardware Prototype
+# Hardware Prototype v0.1 — SP01 Wireless Node
 
 ## Status
 
-**Prototype proposal only — not approved for connection to live packer outputs.**
+**Frozen bench/shadow prototype architecture. Not approved for live packer actuation.**
 
-This document defines the first physical prototype for one filling spout of an eight-spout rotary cement packer. The machine-level target remains approximately 2,000 bags/h or higher. At 2,000 bags/h, one spout completes one cycle every:
+v0.1 intentionally builds **one spout only: SP01**. Do not purchase or build eight nodes yet.
+
+The rotary packer has no practical stationary Ethernet path at the spout. Therefore the prototype uses:
 
 ```text
-3600 s/h × 8 spouts / 2000 bags/h = 14.4 s/spout-cycle
+stationary side: 1 dedicated Wi-Fi AP/router + engineering laptop
+rotating side:   1 autonomous ESP32-S3 SP01 node + LAUMAS TLB + local I/O
 ```
 
-The prototype deliberately uses **one independent controller per spout**. There is no central controller in the critical path.
+Wi-Fi is supervisory only. It is never required to finish, abort, or safely stop the current filling cycle.
 
-## 1. Design objective
+At 2,000 bags/h with 8 spouts:
 
-Build one self-contained filling node that can replace the legacy control logic for a single spout while preserving the proven mechanical sequence:
+```text
+3600 s/h × 8 / 2000 = 14.4 s per spout revolution/cycle
+```
+
+## 1. v0.1 topology
+
+```text
+                         STATIONARY SIDE
+
+                 Laptop / engineering browser
+                           │
+                     Wi-Fi or LAN
+                           │
+                           ▼
+                 ┌───────────────────┐
+                 │ DEDICATED AP/     │
+                 │ ROUTER            │
+                 │ PACKER01 network  │
+                 └─────────┬─────────┘
+                           │ 2.4 GHz Wi-Fi
+                           │ supervisory only
+                           )))
+
+                         ROTATING SIDE
+                           (((
+                           │
+                 ┌─────────▼─────────┐
+                 │ ESP32-S3 SP01     │
+                 │ FreeRTOS          │
+                 │ 8 isolated DI     │
+                 │ 8 protected DO    │
+                 │ isolated RS485    │
+                 │ Wi-Fi STA         │
+                 │ embedded web HMI  │
+                 └──────┬───────┬────┘
+                        │       │
+                   RS485│       │local field I/O
+                        │       │
+                        ▼       ▼
+                  ┌──────────┐  machine devices
+                  │ LAUMAS   │
+                  │ TLB485   │
+                  └────┬─────┘
+                       │
+                    LOAD CELL
+```
+
+There is **no Ethernet connection across the rotating/stationary boundary** in v0.1.
+
+Do not route Ethernet through ordinary carbon brushes or spare slip-ring contacts. If a wired rotating uplink is ever required, use an Ethernet-rated rotary joint/slip ring as a separate future design decision.
+
+The ESP board Ethernet port, if present, is bench/service-only in v0.1.
+
+## 2. Control boundary
+
+SP01 must remain autonomous when the AP/router, laptop, browser, or Wi-Fi link disappears.
+
+Local deterministic path:
+
+```text
+machine DI
+   ↓
+ESP32 process image / FSM
+   ↓
+local DO
+
+load cell
+   ↓
+TLB485
+   ↓ RS485
+ESP32
+```
+
+Supervisory path:
+
+```text
+ESP32
+   ↓ Wi-Fi
+AP/router
+   ↓
+laptop/HMI/historian
+```
+
+The supervisory path may observe and issue validated non-time-critical commands, but is not part of filling cutoff, interlocks, or actuator timing.
+
+## 3. Physical node ownership
+
+One controller owns one spout only.
+
+For v0.1:
+
+```text
+SP01 = one ESP32-S3 + one TLB + one local I/O set
+```
+
+Future replication, only after SP01 acceptance:
+
+```text
+SP01  ESP + TLB
+SP02  ESP + TLB
+...
+SP08  ESP + TLB
+```
+
+No spout is a master for another spout. SP01 must never become a machine-wide dependency merely because it is the first prototype.
+
+## 4. SP01 control sequence
+
+Preserve the proven legacy mechanical sequence:
 
 ```text
 WAIT PERMISSIVE
@@ -31,121 +142,40 @@ WAIT PERMISSIVE
 → COMPLETE
 ```
 
-The prototype must support simulation, bench I/O, shadow operation, and later one-spout live actuation without changing the semantic controller logic.
+No blocking `delay()` calls are allowed in the control FSM. Every state has entry action, tick logic, exit condition, timeout, and fault reaction.
 
-## 2. Per-spout architecture
+## 5. Digital input map
 
-```text
-                       ONE FILLING NODE
-
-                 ┌────────────────────────┐
-                 │ ESP32-S3 + FreeRTOS    │
-                 │                        │
-                 │ deterministic FSM      │
-                 │ 8 isolated DI          │
-                 │ 8 protected DO         │
-                 │ isolated RS485         │
-                 │ Ethernet               │
-                 │ embedded web HMI       │
-                 └───────┬────────┬───────┘
-                         │        │
-                    RS485│        │field I/O
-                         │        │
-                         ▼        ▼
-                    LAUMAS TLB   machine
-                         │       devices
-                         │
-                     load cell
-```
-
-The ESP32-S3 owns the machine sequence and I/O state. The TLB owns load-cell excitation, A/D conversion, filtering/calibration, and transmission of weight/status data.
-
-The HMI is supervisory only. A laptop or browser must never be required for a fill cycle to complete safely.
-
-## 3. Prototype controller hardware
-
-Preferred prototype form factor:
-
-- ESP32-S3 controller board with industrial 24 V interfaces;
-- 8 optically isolated digital inputs;
-- 8 protected transistor digital outputs;
-- isolated RS485;
-- wired Ethernet;
-- 24 VDC supply input;
-- watchdog/brownout support;
-- DIN-rail or panel-mountable enclosure.
-
-A current candidate is a Waveshare ESP32-S3 Ethernet 8DI/8DO class board. **The architecture must not depend on that brand or board.** It is a prototype carrier only.
-
-Production acceptance of any board requires independent review of:
-
-- actual input threshold and isolation rating;
-- output current and thermal derating;
-- common/ground topology;
-- flyback and surge protection;
-- EMC immunity/emissions;
-- brownout/reset behavior;
-- operating temperature;
-- vibration and dust exposure;
-- connector retention;
-- long-term availability.
-
-## 4. I/O baseline
-
-### Digital inputs
-
-| ID | Semantic signal | Legacy function |
+| New channel | Semantic signal | Legacy |
 |---|---|---|
-| DI01 | `hopper.feeder_running` | hopper feeder status |
-| DI02 | `downstream.conveyor_ready` | downstream conveyor status |
-| DI03 | `machine.motor_running` | rotary/main machine motor status |
-| DI04 | `process.initiative` | process permissive/initiative |
-| DI05 | `cycle.fill_position` | fill-position trigger; exact legacy sensor to be confirmed |
-| DI06 | `bag.present` | bag-detect pressure switch |
-| DI07 | `position.push` | push/discharge-position signal |
+| DI01 | `hopper.feeder_running` | INPUT_0 |
+| DI02 | `downstream.conveyor_ready` | INPUT_1 |
+| DI03 | `machine.motor_running` | INPUT_2 |
+| DI04 | `process.initiative` | INPUT_3 |
+| DI05 | `cycle.fill_position` | INPUT_4 — field device still to be physically confirmed |
+| DI06 | `bag.present` | INPUT_5 |
+| DI07 | `position.push` | INPUT_6 |
 | DI08 | `spare` | reserved |
 
-### Weighing channel
+All field DI are assumed to be industrial 24 V signals only after physical tracing and measurement. No legacy 24 V signal may connect directly to MCU GPIO.
 
-| ID | Semantic signal | Hardware |
-|---|---|---|
-| W01 | `weight.net` | load cell → LAUMAS TLB → RS485 |
-
-### Digital outputs
-
-| ID | Semantic actuator | Legacy function |
-|---|---|---|
-| DO01 | `scanner.down` | scanner cylinder solenoid |
-| DO02 | `bag_detect_air` | bag-detection air solenoid |
-| DO03 | `dosing.valve_a` | dosing valve A |
-| DO04 | `dosing.valve_b` | dosing valve B |
-| DO05 | `dosing.valve_c` | dosing valve C |
-| DO06 | `filling.motor` | filling motor contactor command |
-| DO07 | `spout.aeration` | aeration solenoid |
-| DO08 | `bag.push` | push-off cylinder solenoid |
-
-No analog output is required by the legacy mechanism.
-
-## 5. Weighing front end
-
-Prototype default:
+## 6. Weighing channel
 
 ```text
-LAUMAS TLB RS485
+load cell → LAUMAS TLB485 → isolated RS485 → ESP32-S3
 ```
 
-Reason for using an industrial transmitter rather than HX711:
+Semantic input:
 
-- industrial load-cell excitation and signal conditioning;
-- stable calibration and filtering;
-- DIN-rail form factor;
-- digital communication to the controller;
-- reduced sensitivity to MCU-board analog layout;
-- replaceable `WeighingUnit` adapter boundary.
+```text
+W01 = weight.net
+```
 
-The controller must not contain TLB register numbers outside the TLB adapter.
+The TLB owns load-cell excitation, A/D conversion, calibration/filtering, and weight/status transport.
 
-Required semantic interface:
+TLB-specific Modbus addresses belong only in the TLB adapter.
+
+Required interface:
 
 ```text
 WeighingUnit
@@ -157,304 +187,332 @@ WeighingUnit
   diagnostics()
 ```
 
-If later replaced by Dini Argeo, Mettler Toledo, SIWAREX, or an open weighing board, the spout FSM must remain unchanged.
+The SP01 FSM must survive replacement of TLB by another weighing transmitter without changing state semantics.
 
-## 6. I/O electrical design
+## 7. Digital output map — corrected legacy mapping
 
-### Inputs
+The legacy addresses reach OUTPUT_9, but OUTPUT_4 is unused. There are exactly **8 active outputs**.
 
-All 24 V field inputs must enter through isolated industrial DI stages. Do not connect legacy 24 V signals directly to ESP32 GPIO.
+| New DO | Semantic actuator | Legacy address | Field device |
+|---|---|---:|---|
+| DO01 | `scanner.down` | OUTPUT_1 | scanner cylinder solenoid |
+| DO02 | `bag_detect_air` | OUTPUT_2 | bag-detect air solenoid |
+| DO03 | `bag.push` | OUTPUT_3 | bag eject/pusher cylinder |
+| DO04 | `dosing.valve_a` | OUTPUT_5 | dosing valve A |
+| DO05 | `dosing.valve_b` | OUTPUT_6 | dosing valve B |
+| DO06 | `dosing.valve_c` | OUTPUT_7 | dosing valve C |
+| DO07 | `filling.motor` | OUTPUT_8 | filling motor contactor/drive command |
+| DO08 | `spout.aeration` | OUTPUT_9 | aeration solenoid |
 
-### Outputs
+Legacy OUTPUT_4 is not represented as a physical channel.
 
-The controller output stage may directly drive a 24 V coil only after the following are measured and documented:
+Firmware uses semantic names. Legacy output numbers exist only as migration/reference metadata.
 
-- coil nominal voltage;
-- steady-state current;
-- inrush current if relevant;
-- polarity;
-- inductive suppression already present;
-- switching frequency/duty cycle;
-- controller-channel current rating at cabinet temperature.
+## 8. Dosing truth table
 
-If any load exceeds the validated output capability, use an interposing MOSFET/SSR/relay driver.
+Preserve the legacy pneumatic behavior:
 
-`filling.motor` means **contactor/drive command only**. The ESP32 output must never switch the filling motor power directly.
+| Mode | DO04 Valve A | DO05 Valve B | DO06 Valve C |
+|---|---:|---:|---:|
+| OFF | 0 | 0 | 0 |
+| FINE ~30% | 1 | 0 | 1 |
+| COARSE 100% | 1 | 1 | 1 |
 
-### Output fail state
+The controller core should reason in `OFF`, `FINE`, `COARSE`; the output binding expands the mode to three solenoids.
 
-On boot, reset, watchdog timeout, firmware crash, RS485 failure requiring abort, or loss of control authority:
+## 9. Local output electrical rules
+
+All eight local outputs are occupied in v0.1.
+
+Before any field coil is connected, record:
 
 ```text
-dosing valves     CLOSED / de-energized
-filling motor     OFF
-aeration          OFF
-push cylinder     OFF
-bag-detect air    OFF or defined safe state
-scanner           defined mechanical safe state
+scanner coil current            ____ mA
+bag-detect valve current        ____ mA
+pusher valve current            ____ mA
+dosing valve A current          ____ mA
+dosing valve B current          ____ mA
+dosing valve C current          ____ mA
+filling-motor contactor current ____ mA
+aeration valve current          ____ mA
 ```
 
-The exact safe state of scanner and pneumatic elements must be verified against the existing machine before physical actuation.
+Also record voltage, inrush where applicable, suppression, polarity, duty cycle, and cabinet temperature.
 
-## 7. Safety boundary
+Use interposing MOSFET/SSR/relay drivers if any load exceeds the validated controller output capability.
 
-The prototype is **not the safety system**.
+`filling.motor` switches only a contactor/drive command. It must never switch motor power directly.
 
-Existing certified/hardwired safety functions remain authoritative, including emergency stop and motor/actuator isolation.
+## 10. Local fail state
 
-Recommended power split:
+On boot, reset, watchdog, brownout, firmware fault, abort, or loss of control authority, desired output image is:
 
 ```text
-                     230 VAC
-                        │
-                       MCB
-                        │
-                  24 VDC PSU
-                        │
-             ┌──────────┴──────────┐
-             │                     │
-       CONTROL 24 V           ACTUATOR 24 V
-             │                     │
-        ESP32 + TLB          safety contactor /
-                             existing E-stop chain
-                                   │
-                                solenoids
-                              contactor coils
+DO01 scanner          defined safe/de-energized state
+DO02 bag-detect air   OFF
+DO03 pusher           OFF/retracted
+DO04 dosing A         OFF
+DO05 dosing B         OFF
+DO06 dosing C         OFF
+DO07 filling motor    OFF
+DO08 aeration         OFF
 ```
 
-On E-stop, controller electronics should preferably stay powered for diagnostics while actuator 24 V is removed by the safety chain.
+These are desired software states only until the actual valve/actuator mechanics are verified. A bistable valve or mechanically latched device invalidates the simple assumption `OFF = safe`.
 
-The controller should receive a read-only `safety.healthy` or `actuator_power.available` status when available.
+## 11. RS485 topology and future expansion
 
-## 8. RS485 topology
-
-Initial prototype:
+v0.1 local bus:
 
 ```text
-ESP32-S3 RS485 master
+ESP32-S3 Modbus RTU master
         │
-        └──── LAUMAS TLB slave
+        └── TLB485 slave 1
 ```
 
-Use:
+Use isolated RS485, shielded twisted pair, correct termination, defined reference/ground strategy, bounded timeout/retry, stale-data detection, and explicit abort behavior.
 
-- isolated transceiver;
-- shielded twisted pair;
-- correct termination at physical bus ends;
-- defined signal reference/ground strategy;
-- timeout and stale-data detection;
-- bounded retry policy;
-- explicit fault reaction to loss of weighing data.
-
-Do not allow indefinite retries to stall the control task.
-
-## 9. FreeRTOS execution model
-
-One spout does not need complicated concurrency.
-
-Preferred logical tasks:
+Future auxiliary I/O may be added by RS485:
 
 ```text
-high priority:
-  input/process-image acquisition
-  spout FSM
-  interlock evaluation
-  output-image commit
-
-medium priority:
-  TLB/RS485 communications
-  position acquisition
-
-low priority:
-  web HMI / WebSocket
-  logging
-  diagnostics
-  configuration
+ESP RS485-B or validated shared bus
+   └── 8/16-channel remote DO/DI module
 ```
 
-The application should use a PLC-like process image:
+Preferred future rule:
+
+```text
+timing-critical dosing/motor/aeration outputs = local DO
+auxiliary alarms/beacon/buzzer/service outputs = RS485 expansion
+```
+
+If expansion becomes material, prefer a separate UART/RS485 channel for I/O so auxiliary bus faults cannot delay TLB traffic.
+
+## 12. Wi-Fi topology
+
+v0.1 uses exactly one dedicated stationary AP/router and one client node:
+
+```text
+SSID: PACKER01-CONTROL
+
+AP/router
+   )))
+   ))) ESP32-S3 SP01 in STA/client mode
+```
+
+Recommended prototype rules:
+
+- dedicated SSID for the packer prototype;
+- 2.4 GHz first;
+- fixed AP location near/above the packer where practical;
+- do not depend on plant office/guest Wi-Fi;
+- Wi-Fi power-save disabled while machine-powered if supported/configured;
+- AP/router and ESP reconnect statistics recorded;
+- RSSI, disconnect reason, packet loss/latency and reconnect count exposed in diagnostics;
+- external/remote antenna placement preferred if the controller enclosure or machine steel significantly shields the radio;
+- no Internet or cloud dependency for control or HMI.
+
+A per-spout SoftAP/service hotspot may be added later, but it is not required for v0.1 and must not broadcast permanently by default.
+
+## 13. Router/AP role
+
+The AP/router is **not a controller** and not a master.
+
+It provides only:
+
+```text
+Wi-Fi association
+IP addressing/routing
+browser access to SP01
+optional uplink to an engineering/plant network later
+```
+
+If the AP/router reboots or loses power:
+
+```text
+SP01 local filling logic continues
+TLB communication continues
+local DI/DO continues
+HMI becomes OFFLINE/STALE
+records buffer locally
+```
+
+The next safe local state transition must not require router recovery.
+
+## 14. HMI path
+
+```text
+Laptop/browser
+   │
+AP/router
+   ))) Wi-Fi
+   │
+ESP32-S3 SP01 web server
+```
+
+See `docs/HMI.md`.
+
+The browser must never directly address GPIO, raw Modbus registers, or physical coils.
+
+## 15. Power architecture
+
+The rotating node needs stable local control power. Reuse existing rotating 24 V only after measuring quality and grounding; otherwise add local conditioning/DC-DC as required.
+
+Conceptual split:
+
+```text
+rotating 24 V supply
+      │
+      ├── CONTROL branch → ESP32 + TLB
+      │
+      └── ACTUATOR branch → existing safety chain → solenoids/contactor coils
+```
+
+E-stop and safety-rated functions remain independent of ESP firmware and Wi-Fi.
+
+Prefer controller/TLB to remain powered when actuator power is removed so faults remain observable.
+
+## 16. FreeRTOS execution model
+
+Use a PLC-like process image:
 
 ```text
 read physical inputs
 → freeze INPUT IMAGE
-→ execute FSM
+→ read/validate latest TLB weight
+→ execute SP01 FSM
 → build DESIRED OUTPUT IMAGE
-→ apply hard interlocks
-→ commit PHYSICAL OUTPUTS
+→ apply interlocks
+→ commit LOCAL OUTPUT IMAGE
 ```
 
-No state may use blocking `delay()` or unbounded waits.
-
-Every state must have:
-
-- entry action;
-- tick logic;
-- exit condition;
-- timeout;
-- defined fault reaction.
-
-## 10. One firmware image, eight independent nodes
-
-If the SP01 pilot succeeds, deploy the same firmware to eight nodes:
+Suggested priority domains:
 
 ```text
-SP01 ESP32 + TLB + local I/O
-SP02 ESP32 + TLB + local I/O
-...
-SP08 ESP32 + TLB + local I/O
+HIGH:   input image / FSM / interlocks / output commit
+MEDIUM: TLB RS485 / position acquisition
+LOW:    Wi-Fi / HTTP / WebSocket / logging / configuration
 ```
 
-Only configuration differs:
+Wi-Fi or web work may never own an actuator and may never block the high-priority control path.
 
-```yaml
-node:
-  machine: PACKER01
-  spout: SP03
-  node_id: 3
-  angle_offset_deg: 90
-```
+## 17. v0.1 BOM — one SP01 node + one AP/router
 
-A failure of one spout node must not require the other seven nodes to stop unless the mechanical/safety architecture demands it.
-
-Machine-wide permissives may be hardwired/distributed or delivered by a separately validated machine-level mechanism. The local node must not depend on another spout's HMI or application process to complete a safe abort.
-
-## 11. HMI/network boundary
-
-The ESP32 serves its own local engineering HMI over wired Ethernet. See `docs/HMI.md`.
-
-Loss of:
-
-- laptop;
-- browser;
-- Ethernet link;
-- machine-level HMI;
-- historian;
-
-must not stop or corrupt a local filling cycle.
-
-## 12. Budgetary BOM — one spout
-
-**Budgetary only. Verify supplier quotations and exact variants before purchase.**
+**Budgetary only. Verify exact supplier and variant before purchase.**
 
 | Item | Qty | Budget range, VND | Notes |
 |---|---:|---:|---|
 | LAUMAS TLB RS485 | 1 | 5.5–7.0 M | weighing transmitter |
-| ESP32-S3 industrial 8DI/8DO + isolated RS485 + Ethernet carrier | 1 | 1.8–2.5 M | prototype carrier |
-| 24 VDC industrial PSU, approx. 5 A | 1 | 0.6–1.0 M | size after coil survey |
-| DIN enclosure/backplate/rail | 1 set | 0.4–0.8 M | prototype |
+| ESP32-S3 industrial 8DI/8DO + isolated RS485 + Wi-Fi carrier | 1 | 1.8–2.5 M | prototype controller |
+| dedicated Wi-Fi AP/router | 1 | 0.5–2.0 M | stationary prototype network |
+| 24 VDC supply/conditioning as required | 1 | 0.6–1.2 M | size after actual load survey |
+| DIN enclosure/backplate/rail | 1 set | 0.4–0.8 M | rotating SP01 node |
 | fused terminals/fuses/MCB | 1 set | 0.3–0.6 M | protection |
-| safety/actuator isolation additions | 1 set | 0.3–0.8 M | depends on existing circuit |
-| RS485/Ethernet cabling | 1 set | 0.1–0.3 M | shielded field wiring |
+| safety/actuator isolation additions | 1 set | 0.3–0.8 M | depends on existing machine |
+| shielded RS485 cable | 1 set | 0.1–0.2 M | local TLB link |
 | wire/ferrules/labels/glands | 1 set | 0.3–0.6 M | cabinet build |
-| optional interposing output drivers | as needed | 0–1.0 M | only after coil survey |
+| optional external antenna/pigtail | 1 | 0.1–0.5 M | if RF survey requires |
+| optional interposing output drivers | as needed | 0–1.0 M | after coil survey |
 
-Expected prototype hardware budget excluding existing load cell, sensors, cylinders, valves, contactors, and motor:
+Do not multiply the BOM by eight yet.
 
-```text
-approximately 9.3–14.6 M VND per spout
-```
+## 18. Prototype stages
 
-Do **not** multiply this by eight for purchase authorization until the one-spout pilot passes the acceptance gates.
+### P0 — current digital twin
 
-## 13. Prototype stages
+- semantic I/O and cycle model;
+- no hardware authority.
 
-### P0 — simulation only
+### P1 — SP01 controller bench
 
-- current Python digital twin;
-- semantic I/O frozen;
-- no hardware.
-
-### P1 — controller bench
-
-- ESP32 board powered on bench;
-- all DI simulated by switches/24 V test source;
-- all DO connected to lamps/dummy loads;
+- ESP board + switches/24 V input simulator;
+- lamps/dummy loads on all DO;
+- AP/router + laptop HMI;
 - no machine wiring.
 
 ### P2 — weighing bench
 
 - TLB + representative load cell;
-- calibration;
-- weight stream latency/jitter measurement;
-- tare/zero tests;
-- noise/vibration tests where practical.
+- calibration, filtering, latency/jitter and stale-data tests.
 
-### P3 — integrated dry cycle
+### P3 — wireless soak + dry FSM
 
 - ESP + TLB + dummy outputs;
-- full FSM at realistic timing;
-- replay and HMI verification;
-- fault injection.
+- AP/router running continuously;
+- HMI traffic and reconnect stress;
+- AP power-cycle/disconnect during every FSM state;
+- control timing measured with Wi-Fi enabled/disabled.
 
-### P4 — shadow on SP01
+### P4 — rotating RF survey / shadow SP01
 
-- read real machine inputs and weight;
-- calculate outputs but do not energize them;
-- compare proposed state/output timeline with legacy controller.
+- mount node/antenna in intended rotating location;
+- record RSSI, packet loss, disconnect/reconnect through full 360° rotation at realistic machine speeds;
+- read actual SP01 signals/weight where safely possible;
+- calculate but physically block proposed outputs;
+- compare against legacy sequence.
 
 ### P5 — controlled physical output pilot
 
 - one low-risk output at a time;
-- explicit commissioning authorization;
-- immediate rollback path to legacy control.
+- explicit authority and rollback;
+- AP/router may be intentionally disconnected to prove network independence.
 
 ### P6 — full SP01 pilot
 
-- one spout under open control;
-- other seven spouts remain legacy;
-- throughput/accuracy/fault metrics recorded.
+- only SP01 under new control;
+- SP02..SP08 remain legacy;
+- bag accuracy, throughput, faults, Wi-Fi quality and recovery recorded.
 
-### P7 — replication
+### P7 — architecture decision
 
-Only after SP01 proves stability, accuracy, maintainability, and safe failure behavior.
+Only after SP01 evidence decide whether future nodes use:
 
-## 14. Acceptance measurements
+```text
+8 individual Wi-Fi clients to one AP/router
+OR
+rotating Ethernet switch + one dedicated wireless bridge
+OR
+Ethernet-rated rotary joint
+```
 
-Record, do not assume:
+Do not choose the eight-spout network topology before SP01 RF evidence exists.
 
-- controller-cycle period and worst-case jitter;
-- maximum FSM execution time;
-- RS485 round-trip latency distribution;
-- maximum age of accepted weight measurement;
-- command-to-output electrical latency;
-- output-to-pneumatic/mechanical response latency;
-- boot time;
-- watchdog recovery time;
-- brownout behavior;
-- flash/config integrity after repeated power cycling;
-- HMI CPU/RAM/network impact on control task;
-- output state during reset and firmware update;
-- final bag weight distribution;
-- cutoff weight and residual/inflight mass;
-- coarse/fine fill times;
-- missed/false bag detection;
-- fault recovery behavior.
+## 19. Mandatory v0.1 acceptance tests
 
-## 15. Prototype pass criteria
+Before SP01 live actuation:
 
-Before connecting all SP01 outputs, at minimum:
+1. safe local output states proven on boot/reset/watchdog/brownout;
+2. every legacy SP01 field wire physically traced;
+3. all eight coil/contactor loads measured;
+4. TLB end-to-end weight latency/filter delay measured;
+5. loss/staleness of TLB data forces bounded safe abort;
+6. AP/router power-off during every FSM state has **zero control effect**;
+7. browser/laptop disconnect has **zero control effect**;
+8. Wi-Fi reconnect storms do not violate control timing budget;
+9. RF quality measured through a complete rotation, not only with machine stationary;
+10. configuration and event records survive temporary Wi-Fi loss;
+11. safety chain remains independent of ESP/Wi-Fi;
+12. rollback to legacy SP01 is documented and tested;
+13. red-team blockers in `docs/REDTEAM_PROTOTYPE_HMI.md` are closed or explicitly accepted.
 
-1. safe output states are demonstrated on boot/reset/watchdog/power loss;
-2. browser/network failure has zero control effect;
-3. loss/staleness of weighing data forces a bounded safe abort;
-4. every state timeout has been tested;
-5. direct coil-drive current/thermal limits are measured, not assumed;
-6. the existing emergency/safety chain remains independent;
-7. shadow-mode timing agrees sufficiently with the proven legacy sequence;
-8. configuration changes are versioned and recoverable;
-9. a physical rollback to legacy SP01 control is documented and tested;
-10. red-team blockers in `docs/REDTEAM_PROTOTYPE_HMI.md` are closed or explicitly accepted.
+## 20. Frozen v0.1 decision
 
-## 16. Non-goals for prototype
+```text
+PROTOTYPE SCOPE      SP01 only
+CONTROLLER           ESP32-S3 / ESP-IDF / FreeRTOS
+WEIGHER              LAUMAS TLB485
+LOCAL INPUTS         7 used + 1 spare DI
+LOCAL OUTPUTS        8 used DO
+OUTPUT EXPANSION     optional RS485, auxiliary only initially
+LOCAL FIELDBUS       isolated RS485
+SUPERVISORY NETWORK  Wi-Fi
+STATIONARY NETWORK   1 dedicated AP/router
+HMI                  ESP-hosted web UI + laptop/browser
+ETHERNET TO ROTOR    none
+CARBON BRUSH DATA    none
+SAFETY               existing independent hardwired/safety chain
+```
 
-The first prototype does not attempt to prove:
+The v0.1 architectural test is simple:
 
-- functional-safety certification;
-- eight-spout machine-wide optimization;
-- custom PCB readiness;
-- wireless machine control;
-- cloud dependency;
-- full plant MES integration;
-- replacement of every legacy machine circuit.
-
-The purpose is to prove one independent, open, observable, recoverable filling node.
+> **Turn off the AP/router while SP01 is filling. The local controller must remain deterministic and transition to the correct safe local state exactly as if Wi-Fi never existed.**
