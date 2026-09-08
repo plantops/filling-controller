@@ -16,7 +16,7 @@ enum class State : std::uint8_t {
     FineFill,
     Cutoff,
     Settle,
-    WaitPushPosition,
+    WaitDischarge,
     Push,
     Complete,
     Fault,
@@ -30,6 +30,7 @@ enum class Fault : std::uint8_t {
     WeightStale,
     WeightFault,
     StateTimeout,
+    DischargeTimingInvalid,
     IoFault,
 };
 
@@ -40,8 +41,8 @@ enum class Di : std::size_t {
     ProcessInitiative,
     FillPosition,
     BagPresent,
-    PushPosition,
-    Spare,
+    DischargeRefA,
+    DischargeRefB,
 };
 
 enum class Do : std::size_t {
@@ -88,8 +89,17 @@ struct ControllerConfig {
     std::uint64_t coarse_timeout_us{12000000};
     std::uint64_t fine_timeout_us{5000000};
     std::uint64_t settle_min_us{200000};
-    std::uint64_t wait_push_timeout_us{6000000};
+    std::uint64_t wait_discharge_timeout_us{6000000};
     std::uint64_t push_duration_us{500000};
+
+    // Relative geometry. Actual installation angles are commissioning data.
+    // ref_span_deg: sensor A -> sensor B.
+    // target_after_b_deg: sensor B -> physical optimum discharge point.
+    float discharge_ref_span_deg{0.0F};
+    float discharge_target_after_b_deg{0.0F};
+
+    // Measured command -> physical bag release delay.
+    std::uint64_t discharge_actuator_delay_us{0};
 };
 
 struct ControllerSnapshot {
@@ -98,6 +108,8 @@ struct ControllerSnapshot {
     OutputImage outputs{};
     std::uint64_t state_enter_us{0};
     std::uint32_t cycle_id{0};
+    std::uint64_t discharge_ref_interval_us{0};
+    std::uint64_t discharge_command_due_us{0};
 };
 
 constexpr OutputImage safe_output_image() noexcept { return {}; }
