@@ -30,6 +30,21 @@ Production ESP32 firmware does **not** read the raw load-cell bridge directly.
 
 Weight is **not carried on a DI**. A DI can only carry a binary status and cannot replace the continuous digital weight stream required by filling control. All eight SP01 DIs are already assigned to machine signals, so v0.1 allocates no DI to weighing.
 
+## Lifecycle boundary
+
+The weighing chain is deliberately separated from the low-cost replaceable ESP controller.
+
+```text
+valuable / calibrated chain                replaceable control node
+load cell -> TLB485 -> RS485 A/B    --->   ESP controller
+```
+
+Replacing only the ESP controller must not require changing load-cell wiring or automatically recalibrating the TLB485.
+
+The spare controller must recover the correct TLB serial profile/address and resume read-only weight acquisition before any calibration-write capability is enabled.
+
+If the TLB itself is replaced or its calibration state changes, follow the formal calibration procedure in [`CALIBRATION.md`](CALIBRATION.md).
+
 ## Physical connection
 
 Use the board's isolated RS485 terminal:
@@ -89,6 +104,22 @@ A 10 ms poll interval is permitted for testing only after measured latency, TLB 
 
 The TLB and ESP settings must always match. G4 records actual update rate, latency, jitter, communication errors, stale-data behavior and reconnect behavior.
 
+## 70 °C environment
+
+Possible machine ambient may reach approximately 70 °C. The TLB485 is not automatically assigned the same disposable-lifetime philosophy as the inexpensive ESP controller.
+
+During G2T/G4, record temperature at the actual TLB location together with:
+
+```text
+weight update rate
+RS485 error count
+stale events
+reconnect behavior
+zero stability / reading behavior
+```
+
+If the installed transmitter's verified environmental capability or measured field behavior is inadequate, prefer relocating it to a cooler point or selecting an appropriate transmitter rather than accepting uncontrolled weighing-chain failures.
+
 ## Filling target strategy
 
 v0.1 keeps the proven operator compensation method simple. Filling recipes differ primarily by target weight while the other tuned filling parameters remain unchanged.
@@ -130,6 +161,20 @@ stale detection
 cable disconnect behavior
 reconnect behavior
 noise with representative 24 V inductive loads switching
+behavior at representative elevated temperature
 ```
 
-Accuracy/calibration evidence is handled separately in [`CALIBRATION.md`](CALIBRATION.md).
+## Controller replacement check
+
+After replacing only the ESP node:
+
+```text
+confirm firmware/config identity
+confirm TLB address/profile
+confirm read-only digital weight is healthy
+confirm no zero/span write occurred
+compare a known reference / external check as required
+return calibration writes to disabled unless service action explicitly requires them
+```
+
+Accuracy/calibration evidence is handled separately in [`CALIBRATION.md`](CALIBRATION.md). Controller lifecycle and spare policy are defined in [`SERVICEABILITY.md`](SERVICEABILITY.md).
