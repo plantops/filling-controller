@@ -1,15 +1,21 @@
 name: fw
 
 on:
+  workflow_dispatch:
   push:
-    branches: [fw-sp01-v0.1]
+    branches: [main, fw-sp01-v0.1]
     paths:
       - 'firmware/**'
+      - 'VERSION'
       - '.github/workflows/fw-host.yml'
   pull_request:
     paths:
       - 'firmware/**'
+      - 'VERSION'
       - '.github/workflows/fw-host.yml'
+
+permissions:
+  contents: read
 
 jobs:
   linux-amd64:
@@ -24,6 +30,14 @@ jobs:
         run: ctest --test-dir build/host --output-on-failure
       - name: Host smoke
         run: ./build/host/sp01_host
+      - name: Upload Linux host binary
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp01-host-linux-amd64-${{ github.sha }}
+          path: build/host/sp01_host
+          if-no-files-found: error
+          retention-days: 14
 
   esp32-s3:
     runs-on: ubuntu-latest
@@ -35,3 +49,37 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
+
+      - name: Assemble ESP32 flash bundle
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=firmware/esp32-s3/build
+          DST=dist/esp32-s3
+
+          mkdir -p "$DST/bootloader" "$DST/partition_table"
+          cp "$SRC/bootloader/bootloader.bin" "$DST/bootloader/"
+          cp "$SRC/partition_table/partition-table.bin" "$DST/partition_table/"
+          find "$SRC" -maxdepth 1 -type f -name '*.bin' -exec cp {} "$DST/" \;
+
+          if [ -f "$SRC/flash_args" ]; then cp "$SRC/flash_args" "$DST/"; fi
+          if [ -f "$SRC/flasher_args.json" ]; then cp "$SRC/flasher_args.json" "$DST/"; fi
+          if [ -f "$SRC/project_description.json" ]; then cp "$SRC/project_description.json" "$DST/"; fi
+
+          cp VERSION "$DST/VERSION"
+          printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
+          printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+
+          echo 'Flash bundle:'
+          find "$DST" -maxdepth 2 -type f -print | sort
+
+      - name: Upload ESP32 flash bundle
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp01-esp32-s3-${{ github.sha }}
+          path: dist/esp32-s3
+          if-no-files-found: error
+          retention-days: 30
