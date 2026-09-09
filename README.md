@@ -6,6 +6,8 @@ Open controller for an 8-spout rotary cement bag packer.
 
 [Tiếng Việt](README_VI.md)
 
+> **Have the physical ESP board in hand? Start here:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Print [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) for the bench session.
+
 ```text
 STATIONARY
 Linux/laptop -> dedicated Wi-Fi AP/router
@@ -19,6 +21,24 @@ ESP32-S3 / ESP-IDF / C++ / FreeRTOS
 ```
 
 Wi-Fi is not in the control loop. Controller, weighing and I/O stay local to SP01.
+
+## First board — colleague onboarding
+
+The beginner path is deliberately different from machine commissioning:
+
+```text
+board + antenna
+-> USB-only power
+-> GitHub Actions firmware artifact
+-> first flash
+-> verify safe boot / missing-TLB behavior
+-> 24 V board-power test
+-> DI dry-contact test
+-> DO dummy-load test
+-> only then continue to thermal/TLB/machine gates
+```
+
+The detailed guide explains power, terminal purpose, DI/DO semantics, GitHub artifact flashing, expected boot behavior, stop conditions, evidence recording and what **not** to connect. It intentionally refuses to guess the physical left-to-right screw-terminal order; the actual SKU 32108 terminal labels/photo must be used before energizing 24 V I/O.
 
 ## Why this project exists
 
@@ -45,7 +65,6 @@ Software baseline remains **READY FOR BENCH**:
 - MANUAL fill-only and AUTO continuous modes implemented;
 - discharge timing is low-complexity at fixed revolution time; current A/B references provide current-revolution speed measurement;
 - Waveshare 8DI/8DO adapter, TLB485 layer, ESP web HMI and calibration service compile successfully;
-- the latest changes are lifecycle/serviceability/documentation changes; no controller-source logic was changed by this update;
 - the main technical measurements now are reliable TLB485 -> ESP digital weight transport and environmental/serviceability behavior around a possible 70 °C machine ambient.
 
 Physical gates are still pending. No real machine authority is implied by the RC.
@@ -142,7 +161,9 @@ Open `http://<linux-node-ip>:8080/` to review the host HMI preview and parameter
 
 ## Quick start — ESP32-S3
 
-Install ESP-IDF v5.5.5, then:
+For a first physical board, use [`docs/ONBOARDING.md`](docs/ONBOARDING.md) rather than jumping directly to machine wiring.
+
+Developer build path:
 
 ```bash
 cd firmware/esp32-s3
@@ -152,9 +173,11 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Keep calibration writes disabled for the first flash. The TLB and ESP serial settings must match.
+Non-developer colleagues can download the GitHub Actions ESP artifact and flash it with `esptool`; the exact sequence is in the onboarding guide.
 
-Detailed instructions: [`firmware/README.md`](firmware/README.md).
+Keep calibration writes disabled for the first flash. The TLB and ESP serial settings must match when the TLB is later installed.
+
+Detailed firmware instructions: [`firmware/README.md`](firmware/README.md).
 
 ## Operating modes
 
@@ -172,6 +195,8 @@ Detailed instructions: [`firmware/README.md`](firmware/README.md).
 
 ## Current documents
 
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — **start here with a physical board; detailed beginner wiring/power/flash/boot guide**
+- [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — printable first-board checklist
 - [`progress.md`](progress.md) — current gates, risk focus and next actions
 - [`spec/SP01.md`](spec/SP01.md) — canonical SP01 sequence and I/O
 - [`docs/SERVICEABILITY.md`](docs/SERVICEABILITY.md) — replacement, spare, thermal and asset-life-extension strategy
@@ -187,6 +212,7 @@ Detailed instructions: [`firmware/README.md`](firmware/README.md).
 
 ```text
 Linux amd64 simulation + HMI review
+-> beginner first-board onboarding
 -> ESP32 boot / ALL DO safe OFF
 -> dummy 24 V DI/DO
 -> G2T thermal + serviceability characterization
