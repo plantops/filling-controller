@@ -4,6 +4,8 @@ Bộ điều khiển mở cho máy đóng bao xi măng rotary 8 vòi.
 
 **Mục tiêu hiện tại: SP01 hardware-ready để bench, phục vụ rescue controller lỗi thời và kéo dài tuổi thọ tài sản cơ khí.**
 
+> **Đang cầm board ESP thật trên tay? Bắt đầu tại đây:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). In [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) để dùng ngay trên bàn bench.
+
 ```text
 PHẦN CỐ ĐỊNH
 Linux/laptop -> AP/router Wi-Fi riêng
@@ -17,6 +19,24 @@ ESP32-S3 / ESP-IDF / C++ / FreeRTOS
 ```
 
 Wi-Fi không nằm trong vòng điều khiển. Controller, cân và I/O đều cục bộ tại SP01.
+
+## Onboarding board đầu tiên cho người mới
+
+Luồng cho đồng nghiệp chưa từng dùng ESP32/industrial I/O:
+
+```text
+board + antenna
+-> chỉ cấp nguồn bằng USB
+-> lấy firmware artifact từ GitHub Actions
+-> flash lần đầu
+-> kiểm boot an toàn / TLB chưa có
+-> test nguồn 24 V cho board
+-> test DI bằng dry-contact
+-> test DO bằng tải giả
+-> sau đó mới sang thermal / TLB / machine
+```
+
+Tài liệu onboarding giải thích từng đầu nối, nguồn, cách flash, trạng thái boot mong đợi, mapping DI/DO, điều kiện phải dừng và cách ghi evidence. Tài liệu **không đoán thứ tự cọc terminal trái-phải**; trước khi cấp 24 V phải đọc đúng silk-screen trên board thật hoặc chốt bằng ảnh as-built SKU 32108.
 
 ## Vì sao làm dự án này
 
@@ -138,7 +158,9 @@ Mở `http://<ip-linux-node>:8080/` để xem HMI preview, parameter và UX reci
 
 ## Nạp firmware vào ESP32-S3
 
-Dùng ESP-IDF v5.5.5:
+Với board đầu tiên, **không nhảy thẳng vào đấu máy**. Làm theo [`docs/ONBOARDING.md`](docs/ONBOARDING.md).
+
+Developer có ESP-IDF:
 
 ```bash
 cd firmware/esp32-s3
@@ -148,7 +170,9 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Lần flash đầu giữ `TLB calibration writes = disabled`. Cấu hình baud/address/poll của ESP phải khớp với TLB.
+Đồng nghiệp không build code có thể tải artifact ESP từ GitHub Actions và flash bằng `esptool`; lệnh cụ thể có trong onboarding.
+
+Lần flash đầu giữ `TLB calibration writes = disabled`. Khi TLB được lắp sau này, baud/address/poll của ESP phải khớp TLB.
 
 Chi tiết: [`firmware/README.md`](firmware/README.md).
 
@@ -203,6 +227,8 @@ DI7 và DI8 là `discharge_ref_a` và `discharge_ref_b`, không phải service/c
 
 ## Tài liệu cần đọc
 
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — **START HERE khi có board thật: wiring, nguồn, flash, boot, DI/DO cho người mới**
+- [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — checklist một trang để in ra bench
 - [`progress.md`](progress.md) — trạng thái, gate và việc tiếp theo
 - [`spec/SP01.md`](spec/SP01.md) — trình tự, mode và I/O chuẩn
 - [`docs/SERVICEABILITY.md`](docs/SERVICEABILITY.md) — thay nhanh, spare, thermal, asset-life extension
@@ -218,6 +244,7 @@ DI7 và DI8 là `discharge_ref_a` và `discharge_ref_b`, không phải service/c
 
 ```text
 Linux amd64 simulation + review HMI
+-> onboarding board đầu tiên
 -> ESP boot / tất cả DO phải OFF
 -> dummy DI/DO 24 V
 -> G2T thermal + serviceability characterization
