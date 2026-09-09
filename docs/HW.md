@@ -27,6 +27,76 @@ ESP32-S3
 
 No Ethernet crosses the rotating boundary.
 
+## Actual board terminal map — photographed and frozen
+
+Physical board in hand:
+
+```text
+Waveshare ESP32-S3-POE-ETH-8DI-8DO
+MLAB SKU 32108
+```
+
+The cover explicitly labels the field groups:
+
+```text
+DIGITAL OUTPUTS                 DIGITAL INPUTS                 POWER
+COM GND 8 7 6 5 4 3 2 1        COM GND 8 7 6 5 4 3 2 1       7~36 V  +  -
+```
+
+Service edge labels visible on the cover:
+
+```text
+IO1 IO0 RXD TXD SDA SCL GND VCC
+CAN:   H L PE
+RS485: A+ B- PE
+USB / PoE / ANT / BOOT
+```
+
+The open-board photo also shows:
+
+```text
+DI1..DI8 / DGND
+DO1..DO8 / DGND
+RESET
+RS485 NC/120R termination selector
+CAN NC/120R termination selector
+```
+
+Canonical literal map and diagrams:
+
+- [`BOARD_TERMINALS.md`](BOARD_TERMINALS.md)
+- [`assets/BOARD_TERMINALS.svg`](assets/BOARD_TERMINALS.svg)
+- [`ONBOARDING.md`](ONBOARDING.md)
+
+**Rule:** always identify a connection by printed terminal name, never only by left/right physical position.
+
+## First DI bench topology
+
+For the initial passive/dry-contact G2 test:
+
+```text
+INPUT COM ---- switch ---- DIx
+INPUT GND ---- unused for this dry-contact test
+```
+
+Test DI1..DI8 one at a time before connecting any real packer field signal.
+
+## First DO bench topology
+
+The DO stage is open-collector/sinking NPN Darlington.
+
+Use a small 24 V dummy lamp:
+
+```text
+24 V PSU + -------------------+--------------------> OUTPUT COM
+                              |
+                              +---- LAMP -----> DOx
+
+24 V PSU 0V --------------------------------------> OUTPUT GND
+```
+
+Do not connect real solenoids for first G2. `DO7 filling.motor` is always only a command to an external contactor/VFD input, never motor power.
+
 ## Replaceable field unit
 
 Production wiring should converge on a connectorized, labelled controller interface:
@@ -107,9 +177,11 @@ Rules:
 - do not use a 24 V DI for continuous weight values;
 - all eight DIs remain reserved for machine signals;
 - optional binary TLB status via DI is future-only and would require I/O reallocation;
-- use the board RS485 A/B terminal, not raw UART pins at the panel boundary.
+- use the board RS485 `A+ / B- / PE` terminal, not raw UART pins at the panel boundary.
 
 Current onboard RS485 firmware mapping is TX GPIO17, RX GPIO18, RTS GPIO21 behind the board transceiver.
+
+The actual board photo shows the RS485 termination selector marked `NC / 120R`. Leave it unchanged until G4 freezes the bus topology and termination requirement.
 
 Current communication bring-up profile is 9600 bit/s, address 1, 50 ms poll. After G4 proves clean transport, target high-rate operation is 115200 bit/s with 20 ms polling; 10 ms is test-only after measured margin.
 
@@ -117,17 +189,29 @@ See [`WEIGHING.md`](WEIGHING.md).
 
 ## Bench first
 
+Current immediate bench, before TLB arrives:
+
 ```text
-DI1..DI8 <- 24 V switches
-DO1..DO8 -> lamps/dummy loads
-RS485    -> TLB485 -> bench load cell
+USB-C -> first flash / debug
+24 V dedicated + / - -> board-power test
+INPUT COM + dry switch -> DI1..DI8
+OUTPUT COM/GND + lamp -> DO1..DO8
+RS485 -> leave unused until TLB arrives
 ```
 
-Use representative 24 V inductive loads after logic testing. During G4, measure RS485 errors, weight age/latency and reconnect behavior while inductive loads are switching.
+When TLB arrives:
+
+```text
+RS485 A+ / B- -> TLB485 -> bench load cell
+```
+
+Use representative 24 V inductive loads only after logic testing. During G4, measure RS485 errors, weight age/latency and reconnect behavior while inductive loads are switching.
 
 ## Power
 
 24 VDC is assumed available on the rotating machine. Before field connection measure voltage range, available current, grounding and voltage dip during switching.
+
+Dedicated board power terminal is explicitly marked `7~36 V`, `+`, `-`.
 
 Keep control power and actuator power separately protected. Existing E-stop/safety isolation remains independent of ESP32.
 
