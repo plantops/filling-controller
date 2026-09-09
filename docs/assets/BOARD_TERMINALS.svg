@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+  <style>
+    .title{font:700 34px sans-serif}.sub{font:600 22px sans-serif}.txt{font:18px sans-serif}.small{font:15px sans-serif}.mono{font:16px monospace}.box{fill:#fff;stroke:#111;stroke-width:2}.term{fill:#eef7ee;stroke:#174d17;stroke-width:2}.warn{fill:#fff7dd;stroke:#8a6d00;stroke-width:2}.note{fill:#eef4ff;stroke:#274c8c;stroke-width:2}.line{stroke:#111;stroke-width:3;fill:none}.dash{stroke:#555;stroke-width:2;stroke-dasharray:8 8;fill:none}
+  </style>
+  <rect width="1600" height="980" fill="white"/>
+  <text x="60" y="60" class="title">SP01 — Waveshare ESP32-S3-POE-ETH-8DI-8DO</text>
+  <text x="60" y="95" class="sub">Literal terminal map from physical board photos, 2026-09-09</text>
+
+  <rect x="60" y="140" width="1480" height="250" rx="16" class="box"/>
+  <text x="90" y="180" class="sub">FIELD I/O EDGE — use printed terminal names, never left/right memory</text>
+
+  <text x="100" y="225" class="txt">DIGITAL OUTPUTS</text>
+  <g transform="translate(100,245)">
+    <rect x="0" y="0" width="90" height="60" class="term"/><text x="19" y="37" class="mono">COM</text>
+    <rect x="90" y="0" width="90" height="60" class="term"/><text x="112" y="37" class="mono">GND</text>
+    <rect x="180" y="0" width="70" height="60" class="term"/><text x="206" y="37" class="mono">8</text>
+    <rect x="250" y="0" width="70" height="60" class="term"/><text x="276" y="37" class="mono">7</text>
+    <rect x="320" y="0" width="70" height="60" class="term"/><text x="346" y="37" class="mono">6</text>
+    <rect x="390" y="0" width="70" height="60" class="term"/><text x="416" y="37" class="mono">5</text>
+    <rect x="460" y="0" width="70" height="60" class="term"/><text x="486" y="37" class="mono">4</text>
+    <rect x="530" y="0" width="70" height="60" class="term"/><text x="556" y="37" class="mono">3</text>
+    <rect x="600" y="0" width="70" height="60" class="term"/><text x="626" y="37" class="mono">2</text>
+    <rect x="670" y="0" width="70" height="60" class="term"/><text x="696" y="37" class="mono">1</text>
+  </g>
+
+  <text x="880" y="225" class="txt">DIGITAL INPUTS</text>
+  <g transform="translate(880,245)">
+    <rect x="0" y="0" width="90" height="60" class="term"/><text x="19" y="37" class="mono">COM</text>
+    <rect x="90" y="0" width="90" height="60" class="term"/><text x="112" y="37" class="mono">GND</text>
+    <rect x="180" y="0" width="55" height="60" class="term"/><text x="201" y="37" class="mono">8</text>
+    <rect x="235" y="0" width="55" height="60" class="term"/><text x="256" y="37" class="mono">7</text>
+    <rect x="290" y="0" width="55" height="60" class="term"/><text x="311" y="37" class="mono">6</text>
+    <rect x="345" y="0" width="55" height="60" class="term"/><text x="366" y="37" class="mono">5</text>
+    <rect x="400" y="0" width="55" height="60" class="term"/><text x="421" y="37" class="mono">4</text>
+    <rect x="455" y="0" width="55" height="60" class="term"/><text x="476" y="37" class="mono">3</text>
+    <rect x="510" y="0" width="55" height="60" class="term"/><text x="531" y="37" class="mono">2</text>
+    <rect x="565" y="0" width="55" height="60" class="term"/><text x="586" y="37" class="mono">1</text>
+  </g>
+
+  <text x="1300" y="225" class="txt">POWER 7–36 V</text>
+  <rect x="1320" y="245" width="80" height="60" class="term"/><text x="1350" y="37" class="mono" transform="translate(0,245)">+</text>
+  <rect x="1400" y="245" width="80" height="60" class="term"/><text x="1432" y="282" class="mono">-</text>
+
+  <rect x="60" y="430" width="700" height="210" rx="16" class="note"/>
+  <text x="90" y="470" class="sub">FIRST DI TEST — dry contact</text>
+  <text x="90" y="510" class="txt">Leave INPUT GND unused for this test.</text>
+  <text x="90" y="548" class="mono">INPUT COM ─── switch ─── DI1</text>
+  <text x="90" y="585" class="txt">Open = OFF, closed = ON. Move DI1 → DI8 one at a time.</text>
+  <text x="90" y="615" class="small">No packer 24 V signals on the first bench test.</text>
+
+  <rect x="800" y="430" width="740" height="210" rx="16" class="note"/>
+  <text x="830" y="470" class="sub">FIRST DO TEST — 24 V dummy lamp</text>
+  <text x="830" y="510" class="mono">+24 V ───────┬──────── OUTPUT COM</text>
+  <text x="830" y="545" class="mono">              └── LAMP ─── DO1</text>
+  <text x="830" y="580" class="mono">  0 V ───────────────── OUTPUT GND</text>
+  <text x="830" y="615" class="small">DOx is a sinking/open-collector output. No real solenoid on first test.</text>
+
+  <rect x="60" y="680" width="1480" height="210" rx="16" class="box"/>
+  <text x="90" y="720" class="sub">SERVICE EDGE — exact labels visible on the cover</text>
+  <text x="90" y="765" class="mono">IO1  IO0  RXD  TXD  SDA  SCL  GND  VCC</text>
+  <text x="650" y="765" class="mono">CAN: H  L  PE</text>
+  <text x="960" y="765" class="mono">RS485: A+  B-  PE</text>
+  <text x="90" y="815" class="txt">SP01 v0.1: USB-C = first flash/debug; ANT = attach antenna; PoE/Ethernet/CAN = unused.</text>
+  <text x="90" y="850" class="txt">Future TLB485: A/D+ → A+, B/D- → B-. Leave RS485 termination jumper at NC until G4 topology is frozen.</text>
+
+  <rect x="60" y="915" width="1480" height="45" rx="8" class="warn"/>
+  <text x="85" y="945" class="txt">RULE: always identify by printed label. Never say “third screw from the left” without the terminal name.</text>
+</svg>
