@@ -10,6 +10,8 @@ Firmware VERSION: ____________________
 
 GIT_SHA: ____________________
 
+Reference: [`BOARD_TERMINALS.md`](BOARD_TERMINALS.md) / [`assets/BOARD_TERMINALS.svg`](assets/BOARD_TERMINALS.svg)
+
 ## A. Before power
 
 - [ ] Correct board model confirmed
@@ -49,6 +51,8 @@ sp01-esp32-s3-<git-sha>
 - [ ] Artifact SHA matches approved SHA
 - [ ] `VERSION` recorded
 - [ ] `GIT_SHA` recorded
+- [ ] `ONBOARDING.md` read
+- [ ] `BOARD_TERMINALS.md` read
 
 ## D. Flash
 
@@ -100,11 +104,17 @@ Notes: ____________________________________________________________
 
 USB disconnected first.
 
+Actual dedicated power group is printed:
+
+```text
+7~36 V   +   -
+```
+
 - [ ] PSU OFF before wiring
 - [ ] PSU set to 24.0 VDC
 - [ ] Bench current limit set conservatively
-- [ ] Board `+` terminal identified from actual marking
-- [ ] Board `-` terminal identified from actual marking
+- [ ] PSU + -> dedicated terminal printed `+`
+- [ ] PSU 0 V -> dedicated terminal printed `-`
 - [ ] Polarity checked with multimeter
 - [ ] 24 V connected
 - [ ] PSU ON
@@ -115,7 +125,14 @@ USB disconnected first.
 
 ## G. G2a — DI one-by-one dry-contact test
 
-Use only the manufacturer dry-contact topology. Do not inject machine 24 V signals during this first test.
+Exact first-bench wiring:
+
+```text
+INPUT COM ---- dry switch ---- DIx
+INPUT GND ---- unused for this passive-contact test
+```
+
+Do not inject machine 24 V signals during this first test.
 
 | DI | Semantic signal | OFF | ON | PASS |
 |---|---|---|---|---|
@@ -130,7 +147,15 @@ Use only the manufacturer dry-contact topology. Do not inject machine 24 V signa
 
 ## H. G2b — DO dummy-load test
 
-**Dummy lamps/test loads only. No machine solenoids yet.**
+**Dummy lamp/test load only. No machine solenoid yet.**
+
+Exact first-bench concept:
+
+```text
+PSU +24 V -> OUTPUT COM
+PSU 0 V   -> OUTPUT GND
+PSU +24 V -> lamp -> DOx
+```
 
 Remember: DO is a sinking/open-collector transistor output, not a +24 V source.
 
@@ -147,7 +172,20 @@ Remember: DO is a sinking/open-collector transistor output, not a +24 V source.
 
 G2 result: PASS / FAIL / PARTIAL
 
-## I. Stop immediately if
+## I. RS485 — leave alone for now
+
+Actual terminal group:
+
+```text
+A+   B-   PE
+```
+
+- [ ] TLB not yet connected
+- [ ] RS485 `NC/120R` jumper not moved
+
+G4 starts only when the TLB485 is in hand.
+
+## J. Stop immediately if
 
 - [ ] smoke / smell / abnormal heating
 - [ ] PSU current limit reached unexpectedly
@@ -160,16 +198,20 @@ G2 result: PASS / FAIL / PARTIAL
 
 If any item above occurs: **POWER OFF FIRST. Do not move wires while energized.**
 
-## J. Evidence saved
+## K. Evidence saved
 
 - [ ] Board front photo
 - [ ] Terminal-label photo
 - [ ] Board/revision label photo
 - [ ] Firmware VERSION + GIT_SHA
+- [ ] USB boot result
+- [ ] 24 V power result
 - [ ] G1 result
 - [ ] DI table
 - [ ] DO table
-- [ ] Reset test result
+- [ ] Reset/power-cycle result
+- [ ] Bench PSU voltage/current
+- [ ] Ambient temperature
 - [ ] Abnormal observations recorded
 
 Next detailed reference: [`ONBOARDING.md`](ONBOARDING.md)
