@@ -10,6 +10,8 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#include <cinttypes>
+
 namespace {
 
 constexpr char kTag[] = "sp01";
@@ -137,8 +139,6 @@ void control_task(void*) {
             snapshot = g_controller->snapshot();
             (void)g_io->force_safe();
         } else {
-            // v0.1 derives operation mode locally from rotor state:
-            // stopped machine = MANUAL, rotating machine = AUTO.
             inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
                               ? sp01::OperationMode::Auto
                               : sp01::OperationMode::Manual;
