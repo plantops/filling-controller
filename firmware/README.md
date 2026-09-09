@@ -2,7 +2,11 @@
 
 Target: Waveshare Industrial ESP32-S3 8DI/8DO controller, ESP-IDF v5.5.5, C++17, FreeRTOS.
 
-Current maturity: **hardware-ready RC for bench testing**. Linux/shared-core CI and ESP32-S3 compilation pass; real 24 V I/O and TLB485 transport still require physical gates.
+Current maturity: **hardware-ready RC for bench testing**. Linux/shared-core CI and ESP32-S3 compilation pass; real 24 V I/O, TLB485 transport and 70 °C environment/serviceability still require physical gates.
+
+This controller is part of an **obsolescence-rescue / asset-life-extension** project. The firmware must support a low-cost replaceable node rather than assuming the board itself is a 20-year appliance.
+
+> **DESIGN FOR REPLACEMENT, NOT IMMORTALITY.**
 
 ```text
 HIGH    control    DI image -> latest WeightSnapshot -> shared C++ FSM -> interlocks -> DO image
@@ -24,6 +28,62 @@ LOW     web        small ESP-hosted HTML/JSON HMI
 - bilingual ESP-hosted browser HMI;
 - Linux host HMI preview for UI/parameter review;
 - Wi-Fi supervisory only; control does not depend on Wi-Fi.
+
+## Serviceability and spare recovery
+
+A failed ESP controller must not be the only copy of important machine knowledge.
+
+Recoverable information should include:
+
+```text
+firmware version / commit
+spout_id
+I/O inversion / channel mapping
+TLB baud/address/poll profile
+approved target recipes
+commissioned timing values
+service credentials through an appropriate secure process
+calibration audit metadata
+```
+
+Current v0.1 still configures many values through ESP-IDF `menuconfig`. Runtime export/import and simplified spare provisioning are **pending**. Until implemented, keep the approved as-built config outside the board and prepare a pre-flashed known-good spare.
+
+A spare-controller procedure should be:
+
+```text
+remove failed node with machine made safe
+install known-good spare without rewiring individual conductors where practical
+boot with outputs safe
+verify firmware/config identity
+verify TLB read-only communication
+verify no calibration write occurred
+run MANUAL/dummy verification as appropriate
+return to service
+```
+
+Do not define a hard MTTR before a real drill. The design goal is a board swap measured in minutes rather than a full recommissioning job.
+
+Lifecycle details: [`../docs/SERVICEABILITY.md`](../docs/SERVICEABILITY.md).
+
+## Environmental condition — possible 70 °C ambient
+
+Possible machine ambient may reach approximately **70 °C**.
+
+Firmware cannot make an unqualified board temperature-rated, so v0.1 adds **G2T thermal + serviceability characterization**. Required evidence includes:
+
+```text
+boot at elevated temperature
+ALL DO safe through reset/reboot/fault
+control task behavior
+RS485 errors / stale weight
+Wi-Fi loss has no control effect
+reset reason / reboot evidence
+spare replacement + config recovery
+```
+
+Where a reliable temperature source is available, include it in diagnostics/log evidence. Do not invent a shutdown threshold until the sensing method and hardware limits are verified.
+
+The ESP node may be treated as an economically replaceable consumable if field lifetime is acceptable. The TLB/weighing transmitter is a separate module and should be relocated or substituted if its own environment proves unsuitable.
 
 ## Weighing design
 
@@ -229,24 +289,25 @@ Calibration / Hiệu chuẩn
 Diagnostics / Chẩn đoán
 ```
 
-Planned Settings adds fast target-recipe selection plus validated parameter editing. Browser code never gets raw GPIO or raw Modbus write authority.
+Planned Settings adds fast target-recipe selection plus validated parameter editing. Planned Service support adds explicit version/config identity and later export/import for spare provisioning. Browser code never gets raw GPIO or raw Modbus write authority.
 
 Calibration web writes require machine stopped, fill switch OFF, controller idle/safe, fresh stable weight, calibration writes enabled and a valid service token. DI7 and DI8 are discharge reference sensors A/B and are **not** calibration/service switches.
 
-## First physical hardware gates
+## Physical hardware gates
 
 Keep machine actuators disconnected for the first run.
 
 ```text
-G1  controller boots; no reset loop; ALL DO remain safe OFF
-G2  exercise 8 dummy 24 V DI and 8 dummy DO loads
-G3  verify MANUAL dry fill sequence with representative dummy loads
-G4  TLB485 + load cell over board RS485; measure update rate/latency/jitter/errors/reconnect
-G5  calibrate: ZERO -> CHECK 20 kg -> SPAN 50 kg -> VERIFY 0/20/50
-G6  AUTO dry cycle + discharge timing
-G7  Wi-Fi loss / reboot / stale weight / comm fault injection
-G8  SP01 shadow with physical machine outputs isolated
-G9  controlled live SP01 pilot after review
+G1   controller boots; no reset loop; ALL DO remain safe OFF
+G2   exercise 8 dummy 24 V DI and 8 dummy DO loads
+G2T  thermal + serviceability characterization; replacement drill
+G3   verify MANUAL dry fill sequence with representative dummy loads
+G4   TLB485 + load cell over board RS485; measure update rate/latency/jitter/errors/reconnect
+G5   calibrate: ZERO -> CHECK 20 kg -> SPAN 50 kg -> VERIFY 0/20/50
+G6   AUTO dry cycle + discharge timing
+G7   Wi-Fi loss / reboot / stale weight / comm fault injection
+G8   SP01 shadow with physical machine outputs isolated
+G9   controlled live SP01 pilot with known-good spare available
 ```
 
 Safety/E-stop remains outside this firmware. The filling motor DO is a command to an external contactor/VFD input, never motor power.
