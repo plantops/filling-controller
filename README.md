@@ -36,15 +36,16 @@ Canonical lifecycle/service strategy: [`docs/SERVICEABILITY.md`](docs/SERVICEABI
 
 ## Current status
 
-Version marker: [`VERSION`](VERSION) = **`0.1.0-rc1`**. The existing `v0.1.0-rc1` tag remains the frozen RC baseline; `main` may contain later design/document updates.
+Version marker: [`VERSION`](VERSION) = **`0.1.0-rc1`**. The existing `v0.1.0-rc1` tag remains the frozen RC baseline; `main` contains later design/document updates.
 
-Software is **READY FOR BENCH**:
+Software baseline remains **READY FOR BENCH**:
 
 - shared C++17 controller core builds/tests on Linux amd64;
 - ESP32-S3 firmware builds with ESP-IDF v5.5.5;
 - MANUAL fill-only and AUTO continuous modes implemented;
 - discharge timing is low-complexity at fixed revolution time; current A/B references provide current-revolution speed measurement;
 - Waveshare 8DI/8DO adapter, TLB485 layer, ESP web HMI and calibration service compile successfully;
+- the latest changes are lifecycle/serviceability/documentation changes; no controller-source logic was changed by this update;
 - the main technical measurements now are reliable TLB485 -> ESP digital weight transport and environmental/serviceability behavior around a possible 70 °C machine ambient.
 
 Physical gates are still pending. No real machine authority is implied by the RC.
