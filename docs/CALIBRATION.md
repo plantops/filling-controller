@@ -1,16 +1,32 @@
 # Weight Calibration
 
-Calibration is a required service UI function.
+Calibration is a required service UI function and belongs to the weighing chain, not to the disposable ESP controller.
 
 ## Production signal boundary
-
-Calibration belongs to the TLB485 weighing chain:
 
 ```text
 load cell -> TLB485 -> isolated RS485 -> ESP32
 ```
 
 The ESP32 does not calibrate a raw load-cell ADC in production. The browser calls a guarded calibration service; it never writes raw Modbus registers.
+
+## Controller replacement rule
+
+Replacing only the ESP32 controller while retaining the same healthy TLB485/load-cell chain must **not** automatically change zero or span.
+
+A normal ESP replacement therefore restores communication/configuration and verifies the existing weighing chain; it does not issue calibration writes on boot.
+
+Recommended post-swap check:
+
+```text
+TLB online
+correct Modbus address/profile
+zero reading plausible
+known reference / external check agrees as expected
+no calibration-write command issued
+```
+
+If the TLB485 itself, load cell, mechanical weighing assembly or calibration state changes, then use the formal calibration procedure below.
 
 ## Procedure
 
@@ -64,7 +80,11 @@ service token valid
 
 DI7 and DI8 remain discharge-reference inputs; they are not calibration/service switches.
 
+A newly replaced ESP controller should start with calibration writes disabled until service state and installed TLB identity are verified.
+
 ## Keep with each calibration
+
+Calibration audit data must be recoverable outside one ESP flash device.
 
 ```text
 spout_id
@@ -79,4 +99,6 @@ result
 firmware version
 ```
 
-Weighing transport design and G4 evidence are defined in [`WEIGHING.md`](WEIGHING.md).
+Also keep controller-replacement history separately so a board swap is not confused with a weighing recalibration event.
+
+Weighing transport design and G4 evidence are defined in [`WEIGHING.md`](WEIGHING.md). Service/replacement rules are in [`SERVICEABILITY.md`](SERVICEABILITY.md).
