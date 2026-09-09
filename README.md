@@ -6,7 +6,7 @@ Open controller for an 8-spout rotary cement bag packer.
 
 [Tiếng Việt](README_VI.md)
 
-> **Have the physical ESP board in hand? Start here:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Print [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) for the bench session.
+> **Have the physical ESP board in hand? Start here:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Print [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) and keep [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) beside the board.
 
 ```text
 STATIONARY
@@ -38,7 +38,24 @@ board + antenna
 -> only then continue to thermal/TLB/machine gates
 ```
 
-The detailed guide explains power, terminal purpose, DI/DO semantics, GitHub artifact flashing, expected boot behavior, stop conditions, evidence recording and what **not** to connect. It intentionally refuses to guess the physical left-to-right screw-terminal order; the actual SKU 32108 terminal labels/photo must be used before energizing 24 V I/O.
+The actual physical board has now been photographed with the cover on and open. The terminal map is therefore frozen for this board revision:
+
+```text
+DIGITAL OUTPUTS                 DIGITAL INPUTS                 POWER
+COM GND 8 7 6 5 4 3 2 1        COM GND 8 7 6 5 4 3 2 1       7~36 V  +  -
+
+RS485: A+ B- PE
+CAN:   H L PE
+```
+
+The detailed guide now gives literal first-bench wiring:
+
+```text
+DI dry contact: INPUT COM <-> switch <-> DIx
+DO dummy lamp:  OUTPUT COM=+24 V, OUTPUT GND=0 V, +24 V -> lamp -> DOx
+```
+
+Always identify a screw by its printed terminal name, not by remembered left/right orientation. See [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) and the visual [`docs/assets/BOARD_TERMINALS.svg`](docs/assets/BOARD_TERMINALS.svg).
 
 ## Why this project exists
 
@@ -65,7 +82,8 @@ Software baseline remains **READY FOR BENCH**:
 - MANUAL fill-only and AUTO continuous modes implemented;
 - discharge timing is low-complexity at fixed revolution time; current A/B references provide current-revolution speed measurement;
 - Waveshare 8DI/8DO adapter, TLB485 layer, ESP web HMI and calibration service compile successfully;
-- the main technical measurements now are reliable TLB485 -> ESP digital weight transport and environmental/serviceability behavior around a possible 70 °C machine ambient.
+- physical board terminal identity is now frozen from actual hardware photos;
+- the main technical measurements now are real 8DI/8DO electrical behavior, reliable TLB485 -> ESP digital weight transport, and environmental/serviceability behavior around a possible 70 °C machine ambient.
 
 Physical gates are still pending. No real machine authority is implied by the RC.
 
@@ -113,7 +131,7 @@ The design is allowed to accept economically reasonable ESP board lifetime and r
 ```text
 load cell bridge
    -> LAUMAS TLB485
-   -> isolated RS485 terminal on ESP32 board
+   -> isolated RS485 terminal A+ / B- on ESP32 board
    -> asynchronous digital WeightSnapshot
    -> controller
 ```
@@ -196,6 +214,8 @@ Detailed firmware instructions: [`firmware/README.md`](firmware/README.md).
 ## Current documents
 
 - [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — **start here with a physical board; detailed beginner wiring/power/flash/boot guide**
+- [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) — literal actual-board terminal map and first DI/DO wiring
+- [`docs/assets/BOARD_TERMINALS.svg`](docs/assets/BOARD_TERMINALS.svg) — one-page terminal/wiring visual
 - [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — printable first-board checklist
 - [`progress.md`](progress.md) — current gates, risk focus and next actions
 - [`spec/SP01.md`](spec/SP01.md) — canonical SP01 sequence and I/O
