@@ -4,7 +4,7 @@ Bộ điều khiển mở cho máy đóng bao xi măng rotary 8 vòi.
 
 **Mục tiêu hiện tại: SP01 hardware-ready để bench, phục vụ rescue controller lỗi thời và kéo dài tuổi thọ tài sản cơ khí.**
 
-> **Đang cầm board ESP thật trên tay? Bắt đầu tại đây:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). In [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) để dùng ngay trên bàn bench.
+> **Đang cầm board ESP thật trên tay? Bắt đầu tại đây:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). In [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) và đặt [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) cạnh bàn test.
 
 ```text
 PHẦN CỐ ĐỊNH
@@ -36,7 +36,36 @@ board + antenna
 -> sau đó mới sang thermal / TLB / machine
 ```
 
-Tài liệu onboarding giải thích từng đầu nối, nguồn, cách flash, trạng thái boot mong đợi, mapping DI/DO, điều kiện phải dừng và cách ghi evidence. Tài liệu **không đoán thứ tự cọc terminal trái-phải**; trước khi cấp 24 V phải đọc đúng silk-screen trên board thật hoặc chốt bằng ảnh as-built SKU 32108.
+Ảnh board thật đã đủ rõ để **đóng băng literal terminal map** cho revision đang cầm trên tay:
+
+```text
+DIGITAL OUTPUTS                 DIGITAL INPUTS                 POWER
+COM GND 8 7 6 5 4 3 2 1        COM GND 8 7 6 5 4 3 2 1       7~36 V  +  -
+
+RS485: A+ B- PE
+CAN:   H L PE
+```
+
+First-bench wiring giờ không còn phải suy luận:
+
+```text
+DI dry contact:
+INPUT COM <-> công tắc <-> DIx
+INPUT GND không dùng trong test passive này
+
+DO dummy lamp:
+OUTPUT COM = +24 V
+OUTPUT GND = 0 V
++24 V -> đèn thử -> DOx
+```
+
+Quy tắc vẫn giữ: **luôn gọi đúng tên terminal in trên board**, không hướng dẫn kiểu “cọc thứ ba bên trái” vì board có thể lắp xoay hướng.
+
+Xem chi tiết:
+
+- [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md)
+- [`docs/assets/BOARD_TERMINALS.svg`](docs/assets/BOARD_TERMINALS.svg)
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md)
 
 ## Vì sao làm dự án này
 
@@ -62,10 +91,12 @@ Chi tiết canonical: [`docs/SERVICEABILITY.md`](docs/SERVICEABILITY.md).
 
 [`VERSION`](VERSION) = **`0.1.0-rc1`**. Tag `v0.1.0-rc1` vẫn là baseline RC đã đóng băng; `main` có thể chứa các cập nhật thiết kế/tài liệu sau RC.
 
-Phần mềm đã **READY FOR BENCH**. Hai nhóm cần đo thực tế quan trọng nhất hiện nay:
+Phần mềm đã **READY FOR BENCH**. Hiện đã chốt được identity của toàn bộ terminal vật lý trên board thật. Các việc cần đo thực tế tiếp theo là:
 
-1. TLB485 -> isolated RS485 -> ESP có nhanh/sạch/ổn định không;
-2. controller hoạt động và fail như thế nào trong môi trường thực có thể lên khoảng **70 °C ambient**.
+1. G1: boot thật và ALL DO safe OFF;
+2. G2: 8 DI + 8 DO với dry-contact/dummy load;
+3. TLB485 -> isolated RS485 -> ESP khi TLB tới;
+4. controller hoạt động/fail thế nào ở môi trường có thể tới khoảng **70 °C ambient**.
 
 Xem [`progress.md`](progress.md).
 
@@ -109,7 +140,7 @@ Nếu ESP giá rẻ có tuổi thọ field đủ hợp lý về kinh tế, cho p
 ```text
 load cell bridge
    -> LAUMAS TLB485
-   -> cổng isolated RS485 trên board ESP32
+   -> cổng isolated RS485 A+ / B- trên board ESP32
    -> WeightSnapshot số
    -> controller
 ```
@@ -228,7 +259,9 @@ DI7 và DI8 là `discharge_ref_a` và `discharge_ref_b`, không phải service/c
 ## Tài liệu cần đọc
 
 - [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — **START HERE khi có board thật: wiring, nguồn, flash, boot, DI/DO cho người mới**
-- [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — checklist một trang để in ra bench
+- [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) — literal terminal map từ board thật và wiring bench
+- [`docs/assets/BOARD_TERMINALS.svg`](docs/assets/BOARD_TERMINALS.svg) — sơ đồ một trang
+- [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — checklist để in ra bench
 - [`progress.md`](progress.md) — trạng thái, gate và việc tiếp theo
 - [`spec/SP01.md`](spec/SP01.md) — trình tự, mode và I/O chuẩn
 - [`docs/SERVICEABILITY.md`](docs/SERVICEABILITY.md) — thay nhanh, spare, thermal, asset-life extension
