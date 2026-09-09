@@ -11,6 +11,16 @@ FreeRTOS
 
 Python stays on `py-sim` as simulator/reference.
 
+## Product framing
+
+Firmware is part of an **obsolescence-rescue / asset-life-extension** system. The controller board is allowed to be a low-cost replaceable service module; firmware must make replacement predictable and safe.
+
+The lifecycle principle is:
+
+> **DESIGN FOR REPLACEMENT, NOT IMMORTALITY.**
+
+Software therefore optimizes not only control correctness but also failure containment, safe reboot, explicit configuration, reproducible flashing and fast recovery on a spare board.
+
 ## Runtime split
 
 ```text
@@ -21,6 +31,47 @@ LOW     storage: config + bounded event/cycle buffer
 ```
 
 Only one control context commits physical outputs. Control never waits for Wi-Fi, logging or a Modbus reply.
+
+## Recoverability requirements
+
+A failed ESP node must not be the only copy of important machine knowledge.
+
+Recoverable information includes:
+
+```text
+firmware version / commit
+spout_id
+I/O inversion / channel mapping
+TLB serial settings and address
+approved target recipes
+commissioned timing values
+service credentials through an appropriate secure process
+calibration audit metadata
+```
+
+Current v0.1 still uses ESP-IDF `menuconfig` for many settings. Automated runtime export/import and simplified spare provisioning are therefore **pending**, not already-complete features.
+
+Until that capability exists, the approved as-built configuration must be recorded outside the board and a spare should be pre-flashed/tested before storage.
+
+Replacing only the ESP controller must never automatically issue zero/span writes to a healthy existing TLB485.
+
+## Environmental / thermal behavior
+
+Possible machine ambient may reach approximately **70 °C**. Firmware cannot make an unqualified board industrial-rated, but it can make thermal degradation safer and easier to diagnose.
+
+Required software evidence in G2T includes:
+
+```text
+boot and safe-output behavior at elevated temperature
+reset reason / reboot evidence
+control task remains deterministic
+RS485 error/stale behavior under temperature
+Wi-Fi loss remains non-critical
+fault paths leave safe output image
+replacement/spare recovery drill
+```
+
+Where reliable temperature telemetry is available, log it as diagnostic evidence. Do not invent a software shutdown threshold before the actual sensing method and hardware limits are verified.
 
 ## Weighing transport rule
 
@@ -63,11 +114,12 @@ Calibration is separate from recipe offset. No PID or automatic AI target correc
 | M0 Skeleton | ESP-IDF project, C++ model/types, versioned boot | G0 build |
 | M1 Safe platform | board adapter, safe boot/reset/watchdog output image | G1 safe-output proof |
 | M2 Process image | frozen 8DI image, desired 8DO image, single output owner | G2 dummy I/O |
+| M2T Serviceability | thermal behavior, replacement drill, config recovery evidence | G2T thermal/serviceability |
 | M3 FSM | canonical SP01 sequence, monotonic timeouts, fault codes | G3 dry cycle |
 | M4 Weighing | nonblocking TLB485 adapter, age/quality/stability, measured transport profile | G4 TLB bench |
 | M5 Calibration | zero, 20 kg check, 50 kg span, zero/20/50 verify | G5 calibration |
 | M6 HMI | small local web UI, WebSocket telemetry, calibration service | G6 network-loss test |
-| M7 Evidence | event ring, cycle record, reset/comm/timing diagnostics | G7 bench review |
+| M7 Evidence | event ring, cycle record, reset/comm/timing/service diagnostics | G7 bench review |
 | M8 Shadow | real DI + weight, physical DO isolated, legacy comparison | G8 shadow review |
 | M9 Pilot | controlled field outputs and SP01 pilot | G9 live acceptance |
 
@@ -84,6 +136,15 @@ G1 SAFE OUTPUT
 G2 DUMMY I/O
   8 DI switches + 8 dummy DO
   channel map and single output ownership verified
+
+G2T THERMAL + SERVICEABILITY
+  characterize controller/TLB installation temperature
+  elevated-temperature operation with representative I/O/RS485/Wi-Fi load
+  reboot/brownout/fault safe-output proof
+  record reset/error evidence
+  perform one spare-controller replacement drill
+  recover approved configuration
+  confirm ESP replacement does not alter TLB calibration
 
 G3 DRY CYCLE
   full FSM on dummy I/O
@@ -106,7 +167,7 @@ G6 NETWORK LOSS
   local control result unchanged
 
 G7 BENCH REVIEW
-  measured timing, reset, I/O, TLB, calibration and fault evidence
+  measured timing, reset, I/O, TLB, calibration, thermal/service and fault evidence
   red-team R1
 
 G8 SHADOW
@@ -118,6 +179,7 @@ G8 SHADOW
 G9 LIVE
   controlled output connection
   rollback available
+  known-good spare available
   SP01 pilot accepted
 ```
 
@@ -132,6 +194,7 @@ Settings     target recipe + controller parameters
 Timing       state/I-O/weight timeline
 Calibration  zero / 20 kg check / 50 kg span / verify
 Diagnostics  TLB, RS485 age/errors, Wi-Fi, reset reason, firmware
+Service      version/config identity and future export/import support
 ```
 
 The Linux preview may show recipe/settings UX before write authority is implemented on ESP. Runtime writes must use validated service/config APIs; browser code never writes raw GPIO or raw Modbus registers.
@@ -146,3 +209,5 @@ fw-sp01-v0.1    embedded firmware development, kept in sync when requested
 py-sim          simulator/reference
 debate          history/red-team
 ```
+
+Lifecycle/service details: [`SERVICEABILITY.md`](SERVICEABILITY.md).
