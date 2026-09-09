@@ -7,6 +7,8 @@ Open controller for an 8-spout rotary cement bag packer.
 [Tiếng Việt](README_VI.md)
 
 > **Have the physical ESP board in hand? Start here:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Print [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) and keep [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) beside the board.
+>
+> **Need to install the developer toolchain?** See [`docs/INSTALL_ESP_IDF.md`](docs/INSTALL_ESP_IDF.md) for Windows, headless Linux server and macOS. This project is pinned to **ESP-IDF v5.5.5**.
 
 ```text
 STATIONARY
@@ -83,6 +85,7 @@ Software baseline remains **READY FOR BENCH**:
 - discharge timing is low-complexity at fixed revolution time; current A/B references provide current-revolution speed measurement;
 - Waveshare 8DI/8DO adapter, TLB485 layer, ESP web HMI and calibration service compile successfully;
 - physical board terminal identity is now frozen from actual hardware photos;
+- cross-platform ESP-IDF v5.5.5 installation is documented for Windows, Linux server and macOS;
 - the main technical measurements now are real 8DI/8DO electrical behavior, reliable TLB485 -> ESP digital weight transport, and environmental/serviceability behavior around a possible 70 °C machine ambient.
 
 Physical gates are still pending. No real machine authority is implied by the RC.
@@ -181,10 +184,13 @@ Open `http://<linux-node-ip>:8080/` to review the host HMI preview and parameter
 
 For a first physical board, use [`docs/ONBOARDING.md`](docs/ONBOARDING.md) rather than jumping directly to machine wiring.
 
+If ESP-IDF is not installed yet, follow [`docs/INSTALL_ESP_IDF.md`](docs/INSTALL_ESP_IDF.md). It distinguishes the full developer toolchain from the lighter `esptool`-only technician path.
+
 Developer build path:
 
 ```bash
 cd firmware/esp32-s3
+idf.py --version       # must be v5.5.5
 idf.py set-target esp32s3
 idf.py menuconfig
 idf.py build
@@ -214,6 +220,7 @@ Detailed firmware instructions: [`firmware/README.md`](firmware/README.md).
 ## Current documents
 
 - [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — **start here with a physical board; detailed beginner wiring/power/flash/boot guide**
+- [`docs/INSTALL_ESP_IDF.md`](docs/INSTALL_ESP_IDF.md) — ESP-IDF/tools setup on Windows, Linux server and macOS
 - [`docs/BOARD_TERMINALS.md`](docs/BOARD_TERMINALS.md) — literal actual-board terminal map and first DI/DO wiring
 - [`docs/assets/BOARD_TERMINALS.svg`](docs/assets/BOARD_TERMINALS.svg) — one-page terminal/wiring visual
 - [`docs/FIRST_BOARD_CHECKLIST.md`](docs/FIRST_BOARD_CHECKLIST.md) — printable first-board checklist
