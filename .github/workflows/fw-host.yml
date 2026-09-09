@@ -8,6 +8,7 @@ on:
       - 'firmware/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
+      - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
@@ -17,6 +18,7 @@ on:
       - 'firmware/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
+      - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
@@ -77,12 +79,13 @@ jobs:
 
           cp VERSION "$DST/VERSION"
           cp docs/ONBOARDING.md "$DST/ONBOARDING.md"
+          cp docs/INSTALL_ESP_IDF.md "$DST/INSTALL_ESP_IDF.md"
           cp docs/BOARD_TERMINALS.md "$DST/BOARD_TERMINALS.md"
           cp docs/assets/BOARD_TERMINALS.svg "$DST/assets/BOARD_TERMINALS.svg"
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'START WITH ONBOARDING.md and BOARD_TERMINALS.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
