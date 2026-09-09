@@ -1,10 +1,10 @@
 # SP01 Beginner Hardware Onboarding
 
-Vietnamese-first guide for a colleague who has never worked with ESP32, ESP-IDF, industrial DI/DO or RS485.
+Vietnamese-first procedure for a colleague who has never worked with ESP32, ESP-IDF, industrial DI/DO or RS485.
 
-> **Goal of this guide:** take one new Waveshare ESP32-S3 8DI/8DO board from unopened/loose hardware to a safe first boot, first firmware flash, first 24 V power test, first DI test and first dummy-DO test **without connecting the real packer actuators**.
+> **Goal:** take one real Waveshare ESP32-S3 8DI/8DO board from loose hardware to a safe first boot, first firmware flash, first 24 V power test, first DI test and first dummy-DO test **without connecting the real packer actuators**.
 
-Current target board:
+Current board:
 
 ```text
 Waveshare ESP32-S3-POE-ETH-8DI-8DO
@@ -14,16 +14,20 @@ USB Type-C used for first flash/debug
 Ethernet/PoE unused in SP01 v0.1
 ```
 
+Actual-board terminal layout has now been photographed and frozen in:
+
+- [`BOARD_TERMINALS.md`](BOARD_TERMINALS.md) — literal labels and wiring;
+- [`assets/BOARD_TERMINALS.svg`](assets/BOARD_TERMINALS.svg) — one-page visual map;
+- [`FIRST_BOARD_CHECKLIST.md`](FIRST_BOARD_CHECKLIST.md) — printable first-run sheet.
+
 Manufacturer references:
 
 - https://www.waveshare.com/ESP32-S3-POE-ETH-8DI-8DO.htm
 - https://www.waveshare.com/wiki/ESP32-S3-POE-ETH-8DI-8DO
 
-Manufacturer states the board accepts **7–36 VDC from the power screw terminal or 5 V/1 A from USB Type-C**, supports 8 isolated digital inputs, 8 isolated Darlington open-collector digital outputs, USB firmware download/debug, isolated RS485, Wi-Fi and an external SMA antenna.
-
 ---
 
-# 1. Golden rules — read before touching wires
+# 1. Golden rules — read first
 
 For the first bench session:
 
@@ -31,8 +35,8 @@ For the first bench session:
 NO machine actuator wiring
 NO solenoid wiring
 NO filling motor contactor wiring
-NO packer 24 V field signals
-NO load cell wiring directly to ESP
+NO real packer 24 V field signals
+NO load cell wired directly to ESP
 NO TLB required yet
 NO PoE
 NO Ethernet
@@ -42,25 +46,69 @@ Use only:
 
 ```text
 board
-USB-C data cable
+SMA Wi-Fi antenna
+USB-C DATA cable
 laptop
-external Wi-Fi antenna
-bench 24 VDC supply later
+24 V regulated bench supply later
 multimeter
 small screwdriver
-simple switches for DI test
-dummy lamps / test loads for DO test later
+simple dry-contact switch
+small 24 V lamp/test load
+wire + ferrules + labels
 ```
 
-**Do not guess terminal order.** Read the printed silk-screen/label next to each terminal on the actual board. If a terminal label is unclear, stop and take a clear photo before applying voltage.
+Power OFF before moving any screw-terminal wire.
 
-For the first flash, use **USB power only**. Do not connect 24 V at the same time. This removes almost every wiring risk from the first step.
+For the first flash, use **USB power only**. Do not connect 24 V at the same time during novice bring-up.
 
 ---
 
-# 2. What each connector does
+# 2. Learn the board by printed labels
 
-## 2.1 USB Type-C
+The actual SP01 board has been photographed. The cover shows these groups.
+
+## 2.1 Field-I/O edge
+
+```text
+DIGITAL OUTPUTS                 DIGITAL INPUTS                 POWER
+COM GND 8 7 6 5 4 3 2 1        COM GND 8 7 6 5 4 3 2 1       7~36 V  +  -
+```
+
+Do **not** memorize physical left/right because the board can be mounted rotated. Always say the printed terminal name.
+
+Correct instruction:
+
+```text
+Connect PSU + to terminal printed "+" in the 7~36 V group.
+```
+
+Bad instruction:
+
+```text
+Connect PSU + to the left screw.
+```
+
+## 2.2 Service edge
+
+The cover also shows:
+
+```text
+IO1 IO0 RXD TXD SDA SCL GND VCC
+CAN:   H L PE
+RS485: A+ B- PE
+USB
+PoE
+ANT
+BOOT
+```
+
+For the first board test use only **USB** and **ANT** from this edge. CAN, PoE, Ethernet, RS485 and the multi-function terminal are not needed yet.
+
+---
+
+# 3. What every connector means
+
+## 3.1 USB Type-C
 
 Use for:
 
@@ -70,204 +118,188 @@ firmware flashing
 serial/debug communication
 ```
 
-This is the preferred first-power method.
+This is the preferred first-power path.
 
-## 2.2 7–36 VDC power screw terminal
+## 3.2 7–36 VDC power terminal
 
-Final SP01 power source will be 24 VDC.
-
-Conceptually:
+Final SP01 board power will be 24 VDC.
 
 ```text
-24 VDC PSU +  ----> board DC+
-24 VDC PSU 0V ----> board DC-
+24 VDC PSU +  -> board terminal printed +
+24 VDC PSU 0V -> board terminal printed -
 ```
 
-**Use the actual `+` / `-` markings printed on the board. Never identify polarity from physical left/right position alone.**
+Do not use DI/DO `COM` or `GND` as substitutes for the dedicated board-power `+/-` pair.
 
-For a first 24 V bench test, use a regulated bench supply with current limiting. A 1 A current limit is a conservative board-only bench setting, not a board rating and not the final actuator supply design.
+For a first 24 V bench test, a 1 A current limit is a conservative board-only bench setting, not a final design rating.
 
-## 2.3 External antenna
+## 3.3 SMA antenna
 
-Attach the supplied 2.4 GHz antenna to the SMA connector before relying on Wi-Fi.
+Attach the supplied 2.4 GHz antenna before relying on Wi-Fi.
 
-Do not use antenna orientation or enclosure position as an electrical ground point.
+## 3.4 DI1...DI8
 
-## 2.4 Digital inputs DI1…DI8
+SP01 allocation:
 
-The board supports isolated dry-contact and active 5–36 V input arrangements.
-
-SP01 semantic allocation is:
-
-| Board input | SP01 signal | Meaning |
+| DI | Signal | Meaning |
 |---|---|---|
 | DI1 | `hopper.feeder_running` | hopper feeder permissive |
 | DI2 | `downstream.conveyor_ready` | downstream ready; AUTO only |
 | DI3 | `machine.motor_running` | OFF=MANUAL, ON=AUTO |
 | DI4 | `process.initiative` | AUTO enable / MANUAL fill ON-OFF |
-| DI5 | `cycle.fill_position` | AUTO fill-position reference |
-| DI6 | `bag.present` | bag pressure/presence switch |
+| DI5 | `cycle.fill_position` | fill-position reference |
+| DI6 | `bag.present` | bag presence/pressure switch |
 | DI7 | `position.discharge_ref_a` | discharge reference A |
 | DI8 | `position.discharge_ref_b` | discharge reference B |
 
-For first onboarding, use the manufacturer's **passive/dry-contact input topology** with one simple switch and test one channel at a time. Do not inject packer 24 V signals on day one.
+Physical group also has input `COM` and input `GND`.
 
-Because terminal-strip physical order may vary by board revision, the exact common/return terminal must be identified from the printed board label/manufacturer diagram before wiring the switch. Never assume a COM location from a drawing for another Waveshare product.
-
-Firmware mapping behind the board interface is currently:
+For first G2 input test use **dry contact only**:
 
 ```text
-DI1 GPIO4
-DI2 GPIO5
-DI3 GPIO6
-DI4 GPIO7
-DI5 GPIO8
-DI6 GPIO9
-DI7 GPIO10
-DI8 GPIO11
+INPUT COM ---- switch ---- DI1
+INPUT GND ---- unused for this dry-contact test
 ```
 
-Technicians do **not** wire to these GPIO pins. They wire to the isolated DI screw terminals.
+Then move DI1 to DI2 ... DI8 one channel at a time.
 
-## 2.5 Digital outputs DO1…DO8
+Expected:
 
-SP01 semantic allocation:
+```text
+switch OPEN   -> DI OFF
+switch CLOSED -> DI ON
+```
 
-| Board output | SP01 signal | Real-machine destination later |
+Firmware mapping behind isolation is currently DI1..DI8 = GPIO4..GPIO11. Technicians never wire directly to these GPIO pins.
+
+## 3.5 DO1...DO8
+
+SP01 allocation:
+
+| DO | Signal | Real destination later |
 |---|---|---|
-| DO1 | `scanner.down` | scanner cylinder valve command |
+| DO1 | `scanner.down` | scanner-cylinder valve command |
 | DO2 | `bag_detect_air` | bag-detect air valve command |
 | DO3 | `bag.push` | bag push/eject valve command |
 | DO4 | `dosing.valve_a` | dosing valve A |
 | DO5 | `dosing.valve_b` | dosing valve B |
 | DO6 | `dosing.valve_c` | dosing valve C |
-| DO7 | `filling.motor` | external contactor/VFD command only |
+| DO7 | `filling.motor` | contactor/VFD command only |
 | DO8 | `spout.aeration` | aeration valve command |
 
-The Waveshare outputs are **open-collector/open-drain Darlington transistor sinking outputs**, not 24 V voltage sources. Manufacturer rating is up to 500 mA/channel and the board includes flyback protection.
+The output stage is NPN Darlington/open-collector sinking output. `DOx` is not a +24 V source.
 
-Conceptual load wiring is therefore:
-
-```text
-external +24 V
-    |
-   LOAD              lamp / relay / representative coil
-    |
-   DOx  <---- board transistor sinks current when ON
-    |
-output return/common according to the board's printed terminal scheme
-```
-
-Do **not** connect a real filling motor to DO7. DO7 is only a logic command to an external contactor/VFD interface.
-
-For G2, start with lamps or other benign dummy loads. Do not begin with machine solenoids.
-
-Again: before energizing a DO load, identify the exact output common/isolated-supply terminal from the actual board silk-screen/manufacturer diagram. `DOx` is a sinking node; it is not `+24 V`.
-
-## 2.6 RS485
-
-Not needed for the first board session because the TLB485 has not arrived yet.
-
-Later canonical connection is:
+First dummy-lamp wiring:
 
 ```text
-TLB485 A / D+  ----> board RS485 A
-TLB485 B / D-  ----> board RS485 B
-COM/reference  ----> only if required by the verified TLB/board wiring scheme
+24 V PSU + -------------------+--------------------> OUTPUT COM
+                              |
+                              +---- LAMP -----> DO1
+
+24 V PSU 0V --------------------------------------> OUTPUT GND
 ```
 
-Firmware mapping behind the isolated onboard transceiver is:
+Repeat DO1 to DO8 one channel at a time.
+
+Do not connect real machine solenoids during first G2.
+
+## 3.6 RS485 — later when TLB arrives
+
+Actual terminal names:
 
 ```text
-TX   GPIO17
-RX   GPIO18
-RTS  GPIO21
+A+   B-   PE
 ```
 
-Technicians wire to the **RS485 screw terminal**, not directly to GPIO17/18/21.
+Later:
+
+```text
+TLB485 A / D+ -> board A+
+TLB485 B / D- -> board B-
+```
+
+The board photo shows an RS485 jumper marked `NC / 120R`. Leave it at the received/default position until G4 defines whether this node is a bus end requiring termination.
 
 ---
 
-# 3. Minimum bench kit
+# 4. Minimum bench kit
 
 Prepare:
 
 ```text
-1 x Waveshare ESP32-S3-POE-ETH-8DI-8DO
-1 x supplied SMA Wi-Fi antenna
+1 x board
+1 x SMA antenna
 1 x known-good USB-C DATA cable
-1 x Windows or Linux laptop
-1 x 24 VDC regulated bench supply
+1 x Windows/Linux laptop
+1 x regulated 24 V bench supply
 1 x multimeter
 1 x small flat screwdriver
-8 x simple switches or one switch moved channel-by-channel
-8 x 24 V lamps/test loads or one load moved channel-by-channel
+1 x simple switch
+1 x small 24 V lamp/test load
 wire + ferrules + labels
+phone/camera for evidence
 ```
 
-Recommended but not mandatory for first boot:
+Recommended:
 
 ```text
-USB power meter
 bench fuse holder
-DIN rail
-terminal blocks
-camera/phone for evidence photos
+USB power meter
+DIN rail / stable mounting plate
+second person for polarity check
 ```
 
 ---
 
-# 4. Before power — 2 minute visual inspection
+# 5. Visual inspection before power
 
-Do this every time a new board arrives.
+1. Confirm cover says `ESP32-S3-POE-ETH-8DI-8DO`.
+2. Check no shipping damage, loose terminal, cracked case or metal debris.
+3. Check no wire strand is trapped in a terminal.
+4. Attach SMA antenna.
+5. Leave all screw terminals empty.
+6. Do not connect PoE/Ethernet.
+7. Photograph board front and terminal labels.
+8. Record visible revision/ID if present.
 
-1. Confirm product label is `ESP32-S3-POE-ETH-8DI-8DO`.
-2. Check for shipping damage, loose screw terminals, cracked case or bent connector.
-3. Verify there is no wire strand or metal debris across terminals.
-4. Attach the Wi-Fi antenna.
-5. Leave every DI/DO/RS485/CAN/power screw terminal empty.
-6. Do not connect Ethernet/PoE.
-7. Record one clear front photo and product/serial/revision information if visible.
-
-Expected starting condition:
+Starting state:
 
 ```text
 USB disconnected
 24 V disconnected
-all field terminals empty
+DI empty
+DO empty
+RS485 empty
+CAN empty
 machine completely disconnected
 ```
 
 ---
 
-# 5. First power-on — USB only
-
-This is the safest first electrical test.
+# 6. First power — USB only
 
 ```text
 Laptop USB
-    |
- USB-C DATA cable
-    |
-Waveshare board
+   |
+USB-C DATA cable
+   |
+Board
 ```
-
-No other cable should be connected except the antenna.
 
 Procedure:
 
-1. Plug USB-C into the board.
-2. Plug USB into the laptop.
-3. Confirm the board PWR indicator comes on.
-4. Wait 10 seconds.
-5. Touch nothing on the screw terminals.
-6. If the board becomes abnormally hot, smells, smokes, repeatedly disconnects from USB or the laptop reports over-current: unplug immediately and quarantine the board.
+1. Plug USB-C into board.
+2. Plug USB into laptop.
+3. Confirm PWR indication.
+4. Wait 10 s.
+5. Check no abnormal heating, smell, smoke or repeated USB disconnect.
+6. If any abnormality occurs, unplug immediately.
 
-Passing this step only proves basic board power. It does **not** pass G1 yet.
+This proves only basic power. G1 is not yet passed.
 
 ---
 
-# 6. Get the firmware from GitHub Actions
+# 7. Get firmware from GitHub Actions
 
 Repository:
 
@@ -275,12 +307,12 @@ Repository:
 plantops/filling-controller
 ```
 
-For a colleague who does not build firmware locally:
+For a colleague who does not compile locally:
 
-1. Open the repository on GitHub.
+1. GitHub -> repository.
 2. Open **Actions**.
 3. Select workflow **fw**.
-4. Open the latest successful run for the approved commit.
+4. Open the latest **successful approved** run.
 5. Scroll to **Artifacts**.
 6. Download:
 
@@ -288,32 +320,18 @@ For a colleague who does not build firmware locally:
 sp01-esp32-s3-<git-sha>
 ```
 
-7. Extract the ZIP to a simple local folder, for example:
+7. Extract to a simple folder, e.g. `C:\sp01\firmware\`.
+8. Read `BUILD_INFO.txt`.
+9. Record `VERSION` and `GIT_SHA`.
+10. Read `ONBOARDING.md`, `BOARD_TERMINALS.md` and `FIRST_BOARD_CHECKLIST.md` included in the artifact.
 
-```text
-C:\sp01\firmware\
-```
-
-The artifact contains the firmware binaries plus version/build metadata and the onboarding/checklist documents.
-
-Always record both:
-
-```text
-VERSION
-GIT_SHA
-```
-
-before flashing.
-
-Do not flash an artifact whose commit/version has not been approved for the bench session.
+Do not flash an unapproved commit merely because it is newer.
 
 ---
 
-# 7. First flash — easiest supported paths
+# 8. First flash
 
-## Path A — technician has ESP-IDF
-
-From repository source:
+## 8.1 With ESP-IDF
 
 ```bash
 cd firmware/esp32-s3
@@ -334,9 +352,7 @@ Linux example:
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-## Path B — technician uses GitHub Actions artifact
-
-Use the artifact's `flash_args` with Espressif `esptool`.
+## 8.2 From GitHub artifact with esptool
 
 Install once:
 
@@ -344,74 +360,80 @@ Install once:
 python -m pip install --upgrade esptool
 ```
 
-Open a terminal inside the extracted artifact directory.
+Open terminal in the extracted artifact folder.
 
-Windows example:
+Windows:
 
 ```powershell
 python -m esptool --chip esp32s3 -p COM6 write_flash @flash_args
 ```
 
-Linux example:
+Linux:
 
 ```bash
 python -m esptool --chip esp32s3 -p /dev/ttyACM0 write_flash @flash_args
 ```
 
-Use the actual serial port detected on the laptop.
+Use the real detected port.
 
-If normal download cannot start, first try a different known-good data cable and USB port. As a fallback ESP32-S3 download procedure, hold **BOOT**, press/release **RESET**, then release **BOOT** and retry. This fallback is only for entering the ROM download mode; do not use buttons as normal operating controls.
+If download does not start:
 
-After flash completes successfully, press RESET once or unplug/replug USB.
+1. try another known-good DATA cable;
+2. try another USB port;
+3. fallback ROM-download procedure: hold **BOOT**, press/release **RESET**, release **BOOT**, retry flash.
+
+After successful flash, RESET once or unplug/replug USB.
 
 ---
 
-# 8. What a good first boot looks like
+# 9. Expected first boot with no TLB
 
-With only USB connected and no TLB:
+The TLB is not yet in hand. That is okay.
+
+Expected:
 
 ```text
 board boots
 firmware identifies itself
 control task stays alive
-TLB communication is absent/error/stale
+TLB = absent/error/stale
 controller remains safe
-ALL physical DO must remain OFF
-no reset loop
+ALL DO remain OFF
+no reboot loop
 ```
-
-The missing TLB is expected during this first session. It must **not** cause random output activity.
 
 Record:
 
 ```text
-firmware VERSION
+VERSION
 GIT_SHA
 boot time
 reset reason if shown
-TLB status/error
-any repeated reboot
+TLB error/status
+reboot count/behavior
 ```
 
-G1 cannot be marked PASS until all eight physical outputs have been checked safe through boot/reset with suitable indicators/dummy verification.
+A missing TLB must not cause random outputs.
 
 ---
 
-# 9. Wi-Fi / HMI expectation
+# 10. Wi-Fi / HMI expectation
 
-Wi-Fi is supervisory only and never required for local control.
+Wi-Fi is supervisory only.
 
-The current production firmware still uses build/menuconfig values for Wi-Fi credentials. A generic GitHub Actions artifact may therefore have no usable site Wi-Fi credentials configured.
-
-Do not interpret "HMI not reachable" as a controller failure during first USB/G1 testing.
-
-When Wi-Fi credentials are configured and the board joins the dedicated AP/router:
+A generic CI artifact may have no site Wi-Fi credentials. Therefore:
 
 ```text
-browser -> http://<esp32-ip>/
+HMI unreachable != controller failed
 ```
 
-Current live pages show:
+When credentials are configured and board joins the AP:
+
+```text
+http://<esp32-ip>/
+```
+
+Current HMI:
 
 ```text
 Status
@@ -420,271 +442,257 @@ Calibration
 Diagnostics
 ```
 
-Do not use browser workarounds or raw GPIO/Modbus writes to force outputs.
+Never use ad-hoc browser/raw GPIO writes to force outputs.
 
 ---
 
-# 10. First 24 V power test
+# 11. First 24 V board-power test
 
-Do this **after USB-only boot/flash is understood**.
+Do this only after USB flash/boot is understood.
 
-For a novice, use only one power source at a time during initial bring-up.
-
-1. Shut down/unplug USB.
-2. Set bench PSU to 24.0 VDC.
-3. Set a conservative board-only current limit, for example 1 A.
-4. Confirm PSU is OFF.
-5. With multimeter, verify polarity at the loose cable end.
-6. Connect PSU `+` to the board terminal explicitly marked positive.
-7. Connect PSU `0 V/-` to the board terminal explicitly marked negative.
-8. Re-check polarity with another person if available.
+1. Unplug USB.
+2. PSU OFF.
+3. Set PSU to 24.0 VDC.
+4. Set conservative current limit, e.g. 1 A board-only.
+5. Verify cable polarity with multimeter.
+6. Connect PSU + to dedicated board terminal printed `+` in `7~36V` group.
+7. Connect PSU 0 V to dedicated board terminal printed `-`.
+8. Re-check polarity.
 9. Turn PSU ON.
-10. Confirm PWR indication and normal boot behavior.
-11. Turn PSU OFF before moving any wire.
+10. Confirm normal PWR indication/boot.
+11. Watch supply current and temperature.
+12. PSU OFF before touching/moving any terminal wire.
 
-Never identify `+` and `-` from terminal position alone.
-
-If current immediately hits the limit, voltage collapses, the board repeatedly reboots or heats abnormally: switch OFF immediately.
-
-Do not connect USB and 24 V together during this beginner test procedure. Dual-power/debug arrangements can be introduced later only after the exact board power-path behavior is explicitly accepted.
-
----
-
-# 11. First DI test — one dry-contact channel at a time
-
-Objective: prove that physical terminal DI1 maps to software DI1, then DI2 ... DI8.
-
-Keep DO loads disconnected.
-
-Use the Waveshare **passive/dry-contact** topology shown in the manufacturer wiring diagram. Identify the correct isolated input common/return from the actual board labelling before connecting the switch.
-
-Test sequence:
+STOP if:
 
 ```text
-DI1 OFF -> software/HMI DI1 OFF
-close switch
-DI1 ON  -> software/HMI DI1 ON
-open switch
-DI1 OFF -> software/HMI DI1 OFF
+current limit hits unexpectedly
+voltage collapses
+board smells/heats abnormally
+repeated reboot
+polarity is uncertain
 ```
-
-Repeat for DI2 ... DI8.
-
-Record a table:
-
-| Channel | OFF correct | ON correct | Semantic signal | Result |
-|---|---|---|---|---|
-| DI1 | | | hopper.feeder_running | |
-| DI2 | | | downstream.conveyor_ready | |
-| DI3 | | | machine.motor_running | |
-| DI4 | | | process.initiative | |
-| DI5 | | | cycle.fill_position | |
-| DI6 | | | bag.present | |
-| DI7 | | | discharge_ref_a | |
-| DI8 | | | discharge_ref_b | |
-
-If one channel appears inverted, do not immediately change firmware. First verify wiring and then document whether the final installation requires the DI inversion mask.
 
 ---
 
-# 12. First DO test — dummy loads only
+# 12. First DI test — exact physical wiring
 
-Do not use machine solenoids yet.
+Use board 24 V power as established above. Keep DO loads disconnected.
 
-The production firmware owns DO through the controller FSM; technicians must not bypass it with random GPIO code. A dedicated service/bench I/O test path should be used once available/approved.
-
-For each channel, the electrical test objective is:
+For DI1:
 
 ```text
-command OFF -> load OFF
-command ON  -> load ON
-reset       -> load OFF
-power cycle -> no unintended pulse
-fault       -> safe OFF
+INPUT COM ---- dry switch ---- DI1
 ```
 
-Use one small 24 V lamp/test load first, then repeat channel-by-channel.
+Do not connect input GND for this passive-contact test.
 
-The output is a **sinking transistor output**. Wire the load according to the actual board's output/common labels and the Waveshare output wiring diagram. Do not wire a lamp as though DOx were a +24 V source.
+Test:
 
-Before representative solenoid testing, measure the coil voltage/current and confirm it is within the intended output-stage design. The vendor's 500 mA/channel figure is a maximum device capability, not permission to ignore 70 °C thermal derating or multi-channel heating.
+```text
+switch open   -> DI1 OFF
+switch closed -> DI1 ON
+switch open   -> DI1 OFF
+```
+
+Then move only the DI-side wire:
+
+```text
+DI1 -> DI2 -> DI3 -> ... -> DI8
+```
+
+Record every channel in `FIRST_BOARD_CHECKLIST.md`.
+
+If a channel appears inverted:
+
+1. stop;
+2. verify terminal label;
+3. verify switch continuity;
+4. verify HMI/serial signal name;
+5. only then consider `DI_INVERT_MASK`.
+
+Do not modify firmware just to hide a wiring error.
 
 ---
 
-# 13. RESET / power-cycle safety test
+# 13. First DO test — exact dummy-load concept
 
-After dummy-output control is available:
+Only after G1 safe boot is understood.
 
-For each relevant condition:
+Use one small 24 V lamp first.
+
+```text
+PSU +24 V -> OUTPUT COM
+PSU 0 V   -> OUTPUT GND
+PSU +24 V -> one side of lamp
+other lamp side -> DO1
+```
+
+Then use the approved bench/service output-control path to test DO1.
+
+Expected:
+
+```text
+DO command OFF -> lamp OFF
+DO command ON  -> lamp ON
+RESET          -> lamp OFF
+power cycle    -> no unintended pulse
+fault          -> lamp OFF
+```
+
+Repeat DO1..DO8.
+
+Never use random one-off GPIO firmware to bypass the production output-ownership model.
+
+Before using a real coil later, measure:
+
+```text
+coil nominal voltage
+steady current
+inrush if relevant
+duty cycle
+number of channels that may be ON together
+```
+
+The vendor 500 mA/channel maximum is not a commissioned allowance at 70 °C.
+
+---
+
+# 14. RESET and power-cycle safety
+
+With dummy load installed, test at least:
 
 ```text
 normal boot
 RESET button
-USB unplug/replug
-24 V OFF/ON
-firmware restart/watchdog test when available
+USB power cycle
+24 V board power cycle
+missing TLB
+Wi-Fi absent
 ```
 
-verify:
+For every case:
 
 ```text
-no unexpected DO pulse
-all outputs settle to safe OFF
-controller returns to expected state
+NO unintended DO pulse
+NO output remains ON after reset
+NO reboot loop
 ```
 
-Photograph/video any unexpected flash/pulse of a dummy output and stop the gate until explained.
+This is core G1 evidence.
 
 ---
 
-# 14. No-TLB behavior — expected now
-
-Because the TLB485 has not arrived yet:
+# 15. Do not use these interfaces during first onboarding
 
 ```text
-RS485 terminal = empty
-TLB = absent
-weight = unavailable/stale/fault
+PoE/Ethernet
+CAN H/L/PE
+IO1/IO0/RXD/TXD/SDA/SCL/GND/VCC service terminal
+RS485 A+/B-/PE
+TF card
+real machine sensors
+real solenoids
+motor contactor/VFD input
 ```
 
-Expected controller behavior:
-
-```text
-no valid fill authority based on fake weight
-no random DO activity
-controller stays responsive
-TLB error is visible in diagnostics/logs
-```
-
-Do not jumper RS485 or create a fake DI to imitate weight.
-
-When TLB arrives, follow [`WEIGHING.md`](WEIGHING.md).
-
----
-
-# 15. What not to touch in first onboarding
-
-Do not connect:
-
-```text
-real load cell mV/V wires to ESP
-real solenoid bank
-filling motor power
-VFD power terminals
-machine safety/E-stop wiring
-mains AC
-PoE injector
-CAN
-Ethernet for control
-```
-
-Do not change:
-
-```text
-TLB calibration writes -> must remain disabled until TLB/manual verification
-raw Modbus registers
-GPIO assignments
-DO inversion mask
-DI inversion mask
-sensor semantics
-```
-
-without an approved reason and recorded change.
+They are introduced only when their gate requires them.
 
 ---
 
 # 16. Stop conditions
 
-Stop immediately if any of these happens:
+POWER OFF immediately if:
 
 ```text
-smoke / smell / visible overheating
-USB or PSU over-current
-24 V polarity uncertain
-terminal label cannot be identified
-unexpected output pulse
-board reboots repeatedly
-one DI affects another DI unexpectedly
-output remains ON after reset
-metal debris / loose conductor strands
+smoke
+burning smell
+abnormal heat
+unexpected current-limit hit
+polarity uncertain
+terminal label uncertain
+unexpected DO pulse
+DO remains ON after reset
+repeated reboot
+one DI activates another channel unexpectedly
+wire strand/short found
 ```
 
-Do not "try another wire" while powered.
-
-Power OFF first, then diagnose.
+Never troubleshoot by moving energized screw-terminal wires.
 
 ---
 
-# 17. Evidence to save for each board
+# 17. Evidence to save
 
-Create a simple record:
+For G1/G2 record:
 
 ```text
-board ID / label
-purchase source
-hardware revision if visible
-photo front/back/terminal labels
-firmware VERSION
+board front photo
+terminal-label photo
+board/revision label
+VERSION
 GIT_SHA
-flash date
-technician
-USB boot PASS/FAIL
-24 V boot PASS/FAIL
-DI1..DI8 mapping PASS/FAIL
-DO1..DO8 dummy result PASS/FAIL
-reset safe-output PASS/FAIL
-notes / abnormal behavior
+USB first boot result
+24 V first boot result
+DI1..DI8 results
+DO1..DO8 results
+RESET result
+power-cycle result
+unexpected behavior
+bench PSU voltage/current
+ambient temperature
+technician/date
 ```
 
-For production/spare use, add this evidence to the as-built machine record.
+Do not mark a gate PASS from memory. Keep evidence.
 
 ---
 
-# 18. G1/G2 beginner acceptance
-
-A colleague who has never used ESP32 should be able to follow this document and demonstrate:
+# 18. Gate interpretation
 
 ```text
-G1a USB power + firmware flash
-G1b normal boot
-G1c missing TLB handled safely
-G1d ALL DO safe through reset
+G1 PASS requires:
+  safe boot
+  no reset loop
+  missing TLB handled safely
+  all physical DO safe OFF through boot/reset
 
-G2a DI1..DI8 terminal identity
-G2b DO1..DO8 dummy-load identity
-G2c no unintended pulse at boot/reset
+G2 PASS requires:
+  DI1..DI8 physical identity proven
+  DO1..DO8 dummy-load identity proven
+  reset/power-cycle behavior safe
+
+G2T later:
+  elevated temperature + serviceability
+
+G4 later:
+  TLB485 RS485 weight transport
 ```
 
-Only after that move to:
+Current situation:
 
 ```text
-G2T elevated-temperature/serviceability
-G4 TLB485
-G3/G6 process sequence with suitable simulated/real weight source
-G8 shadow
-G9 machine authority
+ESP board: IN HAND
+TLB485:    NOT YET IN HAND
+machine:   MUST REMAIN DISCONNECTED
 ```
 
 ---
 
-# 19. One-page printable checklist
-
-Use [`FIRST_BOARD_CHECKLIST.md`](FIRST_BOARD_CHECKLIST.md) beside this detailed guide during the actual bench session.
-
----
-
-# 20. One remaining as-built item
-
-This guide intentionally does **not** guess the physical left-to-right order of the screw terminals from memory or from another Waveshare model.
-
-Before the first 24 V DI/DO wiring session, capture a clear straight-on photo of the actual SKU 32108 terminal strips and freeze an **as-built terminal drawing** in `hardware/photos/` or the machine record.
-
-Once that photo is available, this document can be upgraded from semantic/exact-label wiring to a literal terminal-by-terminal drawing such as:
+# 19. One-page memory aid
 
 ```text
-terminal 01 -> ...
-terminal 02 -> ...
-...
+1  Read labels
+2  Antenna on
+3  All screw terminals empty
+4  USB only
+5  Flash approved GitHub artifact
+6  Verify safe boot / no TLB / all DO OFF
+7  USB off
+8  24 V to dedicated + / - only
+9  Dry contact: INPUT COM <-> switch <-> DIx
+10 Dummy lamp: +24 -> lamp -> DOx; OUTPUT COM=+24; OUTPUT GND=0V
+11 Test reset/power cycle
+12 Save evidence
+13 Machine stays disconnected
 ```
-
-That final drawing should be what a new technician follows at the machine.
