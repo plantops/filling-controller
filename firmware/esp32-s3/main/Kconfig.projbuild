@@ -88,6 +88,10 @@ config SP01_TLB_ENABLE
 config SP01_TLB_BAUD
     int "TLB485 baud"
     default 9600
+    help
+        Conservative G4 bring-up default is 9600 bit/s. After the installed
+        TLB485 and RS485 link are measured clean, the intended high-rate
+        operating profile is 115200 bit/s. TLB and ESP settings must match.
 
 config SP01_TLB_SLAVE
     int "TLB485 Modbus address"
@@ -96,8 +100,13 @@ config SP01_TLB_SLAVE
 
 config SP01_TLB_POLL_MS
     int "TLB485 poll period (ms)"
-    range 20 1000
+    range 10 1000
     default 50
+    help
+        Conservative G4 bring-up default is 50 ms. After measured latency,
+        jitter and error-rate evidence, target 20 ms (~50 updates/s) at
+        115200 bit/s. 10 ms is test-only and should not be selected merely
+        to maximize update frequency.
 
 config SP01_TLB_CALIBRATION_WRITES
     bool "Enable TLB calibration writes from service HMI"
