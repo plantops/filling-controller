@@ -8,6 +8,29 @@ This controller is part of an **obsolescence-rescue / asset-life-extension** pro
 
 > **DESIGN FOR REPLACEMENT, NOT IMMORTALITY.**
 
+For first physical-board work, use these documents before touching machine wiring:
+
+- [`../docs/ONBOARDING.md`](../docs/ONBOARDING.md)
+- [`../docs/BOARD_TERMINALS.md`](../docs/BOARD_TERMINALS.md)
+- [`../docs/assets/BOARD_TERMINALS.svg`](../docs/assets/BOARD_TERMINALS.svg)
+- [`../docs/FIRST_BOARD_CHECKLIST.md`](../docs/FIRST_BOARD_CHECKLIST.md)
+
+The actual board photos received 2026-09-09 freeze the field terminal groups as:
+
+```text
+DIGITAL OUTPUTS                 DIGITAL INPUTS                 POWER
+COM GND 8 7 6 5 4 3 2 1        COM GND 8 7 6 5 4 3 2 1       7~36 V  +  -
+
+RS485: A+ B- PE
+```
+
+First-bench wiring is therefore explicit:
+
+```text
+DI dry contact: INPUT COM <-> switch <-> DIx
+DO dummy lamp:  OUTPUT COM=+24 V, OUTPUT GND=0 V, +24 V -> lamp -> DOx
+```
+
 ```text
 HIGH    control    DI image -> latest WeightSnapshot -> shared C++ FSM -> interlocks -> DO image
 MEDIUM  weighing   isolated RS485/TLB485 -> latest validated WeightSnapshot
@@ -92,7 +115,7 @@ Production boundary:
 ```text
 load cell bridge
    -> TLB485
-   -> board isolated RS485 terminal
+   -> board isolated RS485 terminal A+ / B-
    -> asynchronous TLB task
    -> latest validated WeightSnapshot
    -> 10 ms controller loop
@@ -118,6 +141,8 @@ Target high-rate profile after G4 transport measurements pass:
 ```
 
 A 10 ms poll is test-only after measured TLB response time, RS485 error rate and controller timing show adequate margin.
+
+The board photo shows an RS485 termination selector marked `NC / 120R`; leave it unchanged until the actual G4 bus topology is frozen.
 
 Canonical details: [`../docs/WEIGHING.md`](../docs/WEIGHING.md).
 
@@ -247,6 +272,8 @@ The TLB and ESP serial settings must match. Start conservative, then move to the
 
 ## Flash ESP32-S3
 
+Preferred first-board path is the GitHub Actions artifact described in [`../docs/ONBOARDING.md`](../docs/ONBOARDING.md). Developers may also flash from source.
+
 Connect the board with a USB data cable.
 
 Linux port discovery:
@@ -299,7 +326,7 @@ Keep machine actuators disconnected for the first run.
 
 ```text
 G1   controller boots; no reset loop; ALL DO remain safe OFF
-G2   exercise 8 dummy 24 V DI and 8 dummy DO loads
+G2   exercise 8 dry-contact DI and 8 dummy DO loads using actual terminal map
 G2T  thermal + serviceability characterization; replacement drill
 G3   verify MANUAL dry fill sequence with representative dummy loads
 G4   TLB485 + load cell over board RS485; measure update rate/latency/jitter/errors/reconnect
