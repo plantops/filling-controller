@@ -12,11 +12,55 @@ Linux/laptop -> AP/router Wi-Fi riêng
 PHẦN QUAY SP01
 ESP32-S3 / ESP-IDF / C++ / FreeRTOS
   |- 8 DI / 8 DO
-  |- RS485 -> LAUMAS TLB485 -> load cell
+  |- isolated RS485 -> LAUMAS TLB485 -> load cell
   `- Web HMI cục bộ
 ```
 
 Wi-Fi không nằm trong vòng điều khiển. Controller, cân và I/O đều cục bộ tại SP01.
+
+## Trạng thái hiện tại
+
+[`VERSION`](VERSION) = **`0.1.0-rc1`**. Tag `v0.1.0-rc1` vẫn là baseline RC đã đóng băng; `main` có thể chứa các cập nhật thiết kế/tài liệu sau RC.
+
+Phần mềm đã **READY FOR BENCH**. Rủi ro kỹ thuật cần đo tập trung nhất hiện nay là lấy tín hiệu cân số từ TLB485 lên ESP ổn định, nhanh và có xử lý stale/fault rõ ràng.
+
+Xem [`progress.md`](progress.md).
+
+## Thiết kế tín hiệu cân — đã chốt
+
+```text
+load cell bridge
+   -> LAUMAS TLB485
+   -> cổng isolated RS485 trên board ESP32
+   -> WeightSnapshot số
+   -> controller
+```
+
+Nguyên tắc:
+
+- ESP32 production không đọc trực tiếp tín hiệu mV/V của load cell;
+- **không dùng DI để truyền giá trị cân liên tục**;
+- cả 8 DI giữ cho tín hiệu máy;
+- task TLB đọc Modbus độc lập, controller không block chờ RS485;
+- bring-up ban đầu: 9600 bit/s, address 1, poll 50 ms;
+- sau khi G4 đo tốt: mục tiêu 115200 bit/s, poll 20 ms, khoảng 50 mẫu/s;
+- poll 10 ms chỉ thử khi latency/error/timing thực tế cho phép.
+
+Chi tiết canonical: [`docs/WEIGHING.md`](docs/WEIGHING.md).
+
+## Recipe target
+
+Giữ cách vận hành đã proven: các bộ recipe khác nhau chủ yếu ở target, các tham số filling đã tune giữ nguyên nếu không có lý do thay đổi.
+
+```text
+50.0 kg
+50.1 kg
+50.2 kg
+50.3 kg
+...
+```
+
+Kiểm bao bằng cân ngoài rồi đổi target rất nhanh để adapt thực tế. Đây là **operating target**, không phải calibration. v0.1 không cần PID hay AI tự học target.
 
 ## Chạy simulation trên Linux amd64
 
@@ -28,21 +72,11 @@ cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
 cmake --build build/host --parallel
 ctest --test-dir build/host --output-on-failure
 ./build/host/sp01_host
-```
 
-Xem HMI preview và bộ tham số hiện tại:
-
-```bash
 ./firmware/host/serve-hmi.sh 8080
 ```
 
-Mở:
-
-```text
-http://<ip-linux-node>:8080/
-```
-
-HMI trên Linux chỉ là **mock/read-only để review UI**; không có GPIO, Modbus hay quyền điều khiển actuator.
+Mở `http://<ip-linux-node>:8080/` để xem HMI preview, parameter và UX recipe. HMI Linux là mock/read-only, không có GPIO/Modbus/actuator authority.
 
 ## Nạp firmware vào ESP32-S3
 
@@ -56,34 +90,11 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Trong `menuconfig -> SP01 Filling Controller` cấu hình Wi-Fi SSID/password và service token. Lần flash đầu giữ `TLB calibration writes = disabled`.
+Lần flash đầu giữ `TLB calibration writes = disabled`. Cấu hình baud/address/poll của ESP phải khớp với TLB.
 
-Linux thường thấy port dạng:
+Linux thường thấy `/dev/ttyACM0` hoặc `/dev/ttyUSB0`; Windows dùng COM tương ứng.
 
-```text
-/dev/ttyACM0
-/dev/ttyUSB0
-```
-
-Ví dụ:
-
-```bash
-idf.py -p /dev/ttyACM0 flash monitor
-```
-
-Windows ví dụ:
-
-```powershell
-idf.py -p COM6 flash monitor
-```
-
-Sau khi ESP vào Wi-Fi, mở:
-
-```text
-http://<ip-esp32>/
-```
-
-Chi tiết đầy đủ về HMI, parameter, flash và hardware gate: [`firmware/README.md`](firmware/README.md).
+Chi tiết: [`firmware/README.md`](firmware/README.md).
 
 ## Chế độ vận hành
 
@@ -96,14 +107,7 @@ OFF -> nghỉ
 ON  -> giữ bao -> cân -> nạp thô -> nạp tinh -> đủ cân -> dừng
 ```
 
-Ở MANUAL:
-
-- không cần tín hiệu máy quay;
-- không cần conveyor ready;
-- bỏ qua fill-position và 2 cảm biến discharge;
-- tuyệt đối không kích `bag.push`;
-- đủ cân thì dừng ở COMPLETE, không tự chạy chu kỳ kế tiếp;
-- gạt OFF thì dừng nạp và trở về trạng thái chờ.
+Ở MANUAL không cần conveyor ready/fill position/discharge refs và tuyệt đối không kích `bag.push`.
 
 ### AUTO
 
@@ -122,32 +126,32 @@ permissive
 -> chu kỳ tiếp theo
 ```
 
-Hai cảm biến discharge dùng để loại bỏ sai số do tốc độ quay thay đổi. Firmware đo thời gian A->B rồi chuẩn hoá countdown. `discharge_lead` chỉ hiệu chỉnh vị trí, không dùng fixed delay theo một tốc độ danh định.
+Ở chu kỳ danh định 14.4 s/rev, điểm đổ là cố định sau khi tune geometry + actuator lead. Khi tốc độ đổi, thời gian delay scale theo tốc độ quay. Hai sensor A/B hiện giữ lại để đo tốc độ ngay trong revolution hiện tại; về nguyên lý một sensor + đo chu kỳ quay cũng có thể đủ nếu field evidence xác nhận.
 
-## Lưu ý hiệu chuẩn
+## Hiệu chuẩn
 
-DI7 và DI8 hiện là `discharge_ref_a` và `discharge_ref_b`, **không phải service/calibration switch**.
+Calibration và target recipe là hai việc riêng. Không sửa zero/span để bù target production.
 
-Calibration từ Web HMI chỉ được phép khi đồng thời thỏa điều kiện service: máy dừng, fill switch OFF, controller ở trạng thái an toàn, output OFF, cân ổn định và dữ liệu cân còn mới, calibration writes đã enable, service token hợp lệ.
+DI7 và DI8 là `discharge_ref_a` và `discharge_ref_b`, không phải service/calibration switch.
 
 ## Nhánh
 
 | Branch | Mục đích |
 |---|---|
-| `main` | spec + integrated SP01 RC baseline hiện hành |
-| `fw-sp01-v0.1` | nhánh phát triển firmware SP01; sync với RC baseline |
+| `main` | integrated design/docs/firmware baseline hiện hành |
+| `fw-sp01-v0.1` | nhánh phát triển firmware SP01; sync khi yêu cầu |
 | `py-sim` | digital twin Python / replay / đối chiếu |
 | `debate` | lịch sử thảo luận và red-team |
 
-Version hiện tại: [`VERSION`](VERSION) = `0.1.0-rc1`.
-
 ## Tài liệu cần đọc
 
+- [`progress.md`](progress.md) — trạng thái, gate và việc tiếp theo
 - [`spec/SP01.md`](spec/SP01.md) — trình tự, mode và I/O chuẩn
-- [`docs/HW.md`](docs/HW.md) — kiến trúc và đấu nối prototype
-- [`docs/BOM.md`](docs/BOM.md) — danh sách mua cho 1 node
-- [`docs/CALIBRATION.md`](docs/CALIBRATION.md) — hiệu chuẩn cân
-- [`docs/FW.md`](docs/FW.md) — gate và milestone firmware
+- [`docs/WEIGHING.md`](docs/WEIGHING.md) — load cell/TLB485/RS485 và recipe target
+- [`docs/HW.md`](docs/HW.md) — kiến trúc/đấu nối prototype
+- [`docs/BOM.md`](docs/BOM.md) — BOM 1 node
+- [`docs/CALIBRATION.md`](docs/CALIBRATION.md) — hiệu chuẩn
+- [`docs/FW.md`](docs/FW.md) — kiến trúc/gate firmware
 - [`firmware/README.md`](firmware/README.md) — simulation, HMI, parameter và flash
 - [`hardware/README.md`](hardware/README.md) — link hãng, manual, ảnh
 
@@ -157,10 +161,10 @@ Version hiện tại: [`VERSION`](VERSION) = `0.1.0-rc1`.
 Linux amd64 simulation + review HMI
 -> ESP boot / tất cả DO phải OFF
 -> dummy DI/DO 24 V
--> TLB485 + load cell
+-> TLB485 digital weight qua isolated RS485
 -> hiệu chuẩn 0 / 20 / 50 kg
 -> dry cycle MANUAL/AUTO
--> test mất Wi-Fi / reboot / fault
+-> test mất Wi-Fi / reboot / stale / comm fault
 -> shadow SP01
 -> kết nối máy có kiểm soát
 ```
