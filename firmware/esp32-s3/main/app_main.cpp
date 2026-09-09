@@ -21,6 +21,8 @@ portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 sp01::InputImage g_inputs{};
 sp01::ControllerSnapshot g_controller_snapshot{};
 sp01::ControllerConfig g_controller_config{};
+std::uint8_t g_bench_do_channel = 0;
+std::uint64_t g_bench_do_until_us = 0;
 
 sp01::ControllerConfig make_controller_config() noexcept {
     sp01::ControllerConfig c{};
@@ -78,6 +80,35 @@ esp_err_t hmi_cal_span(float kg) noexcept {
     return g_tlb->calibration_span(kg);
 }
 
+esp_err_t hmi_bench_do_pulse(std::uint8_t channel, std::uint32_t pulse_ms) noexcept {
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+    if (channel < 1 || channel > 8 || pulse_ms == 0 || pulse_ms > 1000) return ESP_ERR_INVALID_ARG;
+    const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
+    portENTER_CRITICAL(&g_status_mux);
+    g_bench_do_channel = channel;
+    g_bench_do_until_us = now + static_cast<std::uint64_t>(pulse_ms) * 1000ULL;
+    portEXIT_CRITICAL(&g_status_mux);
+    ESP_LOGW(kTag, "G2 BENCH pulse DO%u for %" PRIu32 " ms", static_cast<unsigned>(channel), pulse_ms);
+    return ESP_OK;
+#else
+    (void)channel;
+    (void)pulse_ms;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+esp_err_t hmi_bench_do_off() noexcept {
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+    portENTER_CRITICAL(&g_status_mux);
+    g_bench_do_channel = 0;
+    g_bench_do_until_us = 0;
+    portEXIT_CRITICAL(&g_status_mux);
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 #if CONFIG_SP01_TLB_ENABLE
 void weighing_task(void*) {
     TickType_t last = xTaskGetTickCount();
@@ -114,11 +145,38 @@ void control_task(void*) {
 
             const auto weight = g_tlb->snapshot();
             snapshot = g_controller->tick(now, inputs, weight);
-            io_err = g_io->commit_outputs(snapshot.outputs);
+
+            sp01::OutputImage physical_outputs = snapshot.outputs;
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // G2 bench artifact is deliberately non-operational: normal process
+            // outputs are suppressed. Only one explicit HMI-requested DO may pulse,
+            // and it automatically returns to all-off after <= 1 second.
+            physical_outputs = sp01::safe_output_image();
+            std::uint8_t bench_channel = 0;
+            std::uint64_t bench_until = 0;
+            portENTER_CRITICAL(&g_status_mux);
+            bench_channel = g_bench_do_channel;
+            bench_until = g_bench_do_until_us;
+            if (bench_channel != 0 && now >= bench_until) {
+                g_bench_do_channel = 0;
+                g_bench_do_until_us = 0;
+                bench_channel = 0;
+            }
+            portEXIT_CRITICAL(&g_status_mux);
+            if (bench_channel >= 1 && bench_channel <= 8) {
+                physical_outputs.channels[bench_channel - 1] = true;
+            }
+            snapshot.outputs = physical_outputs;
+#endif
+
+            io_err = g_io->commit_outputs(physical_outputs);
             if (io_err != ESP_OK) {
                 (void)g_io->force_safe();
                 g_controller->force_fault(sp01::Fault::IoFault, now);
                 snapshot = g_controller->snapshot();
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+                snapshot.outputs = sp01::safe_output_image();
+#endif
             }
         }
 
@@ -152,6 +210,9 @@ extern "C" void app_main(void) {
     g_controller = &controller;
 
     ESP_LOGI(kTag, "SP01 v0.1 ESP-IDF/C++ controller");
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+    ESP_LOGW(kTag, "G2 BENCH BUILD: normal process outputs suppressed; HMI one-hot DO pulse only");
+#endif
     ESP_ERROR_CHECK(io.init(static_cast<std::uint8_t>(CONFIG_SP01_DI_INVERT_MASK),
                             static_cast<std::uint8_t>(CONFIG_SP01_DO_INVERT_MASK)));
     ESP_ERROR_CHECK(io.force_safe());
@@ -181,6 +242,10 @@ extern "C" void app_main(void) {
     web.ssid = CONFIG_SP01_WIFI_SSID;
     web.password = CONFIG_SP01_WIFI_PASSWORD;
     web.service_token = CONFIG_SP01_SERVICE_TOKEN;
-    const esp_err_t web_err = sp01::web_hmi_start(web, fill_hmi_snapshot, hmi_cal_zero, hmi_cal_span);
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+    web.bench_do_enabled = true;
+#endif
+    const esp_err_t web_err = sp01::web_hmi_start(web, fill_hmi_snapshot, hmi_cal_zero, hmi_cal_span,
+                                                  hmi_bench_do_pulse, hmi_bench_do_off);
     if (web_err != ESP_OK) ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
 }
