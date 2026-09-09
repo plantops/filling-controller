@@ -8,6 +8,8 @@ on:
       - 'firmware/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
+      - 'docs/BOARD_TERMINALS.md'
+      - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
       - '.github/workflows/fw-host.yml'
   pull_request:
@@ -15,6 +17,8 @@ on:
       - 'firmware/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
+      - 'docs/BOARD_TERMINALS.md'
+      - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
       - '.github/workflows/fw-host.yml'
 
@@ -62,7 +66,7 @@ jobs:
           SRC=firmware/esp32-s3/build
           DST=dist/esp32-s3
 
-          mkdir -p "$DST/bootloader" "$DST/partition_table"
+          mkdir -p "$DST/bootloader" "$DST/partition_table" "$DST/assets"
           cp "$SRC/bootloader/bootloader.bin" "$DST/bootloader/"
           cp "$SRC/partition_table/partition-table.bin" "$DST/partition_table/"
           find "$SRC" -maxdepth 1 -type f -name '*.bin' -exec cp {} "$DST/" \;
@@ -73,10 +77,12 @@ jobs:
 
           cp VERSION "$DST/VERSION"
           cp docs/ONBOARDING.md "$DST/ONBOARDING.md"
+          cp docs/BOARD_TERMINALS.md "$DST/BOARD_TERMINALS.md"
+          cp docs/assets/BOARD_TERMINALS.svg "$DST/assets/BOARD_TERMINALS.svg"
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'START WITH ONBOARDING.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'START WITH ONBOARDING.md and BOARD_TERMINALS.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
