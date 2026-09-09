@@ -130,4 +130,12 @@ config SP01_SERVICE_TOKEN
     help
         No default token. If empty, calibration HTTP writes are rejected.
 
+config SP01_BENCH_DO_TEST_ENABLE
+    bool "Enable G2 bench-only DO pulse test"
+    default n
+    help
+        Exposes a one-output-at-a-time, auto-off pulse command on the local HMI.
+        This exists only for disconnected bench validation of DO1..DO8. Never
+        use it with machine actuators, solenoids or contactors connected.
+
 endmenu
