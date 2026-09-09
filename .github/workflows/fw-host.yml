@@ -7,11 +7,15 @@ on:
     paths:
       - 'firmware/**'
       - 'VERSION'
+      - 'docs/ONBOARDING.md'
+      - 'docs/FIRST_BOARD_CHECKLIST.md'
       - '.github/workflows/fw-host.yml'
   pull_request:
     paths:
       - 'firmware/**'
       - 'VERSION'
+      - 'docs/ONBOARDING.md'
+      - 'docs/FIRST_BOARD_CHECKLIST.md'
       - '.github/workflows/fw-host.yml'
 
 permissions:
@@ -68,9 +72,11 @@ jobs:
           if [ -f "$SRC/project_description.json" ]; then cp "$SRC/project_description.json" "$DST/"; fi
 
           cp VERSION "$DST/VERSION"
+          cp docs/ONBOARDING.md "$DST/ONBOARDING.md"
+          cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'START WITH ONBOARDING.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
