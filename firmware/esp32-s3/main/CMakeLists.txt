@@ -3,4 +3,5 @@ idf_component_register(
     INCLUDE_DIRS "." "include"
     REQUIRES driver esp_timer esp_system esp_hw_support spi_flash
              esp_eth esp_netif esp_event lwip esp_http_server controller
+             board_io tlb485 web_hmi
 )
