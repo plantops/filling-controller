@@ -28,6 +28,8 @@
 #include "esp_eth_phy.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "sdkconfig.h"
+#include "sp01/vio_web.hpp"
 #include "esp_flash.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -501,6 +503,19 @@ void poll_eth_dhcp() {
         record(5, Verdict::kFail, "link DOWN reported by esp_eth driver");
     }
 
+#ifdef CONFIG_SP01_VIRTUAL_IO
+    static bool vio_started = false;
+    if (g_got_ip && !vio_started) {
+        sp01::vio_set_ip(g_ip_text);
+        const esp_err_t verr = sp01::vio_start();
+        vio_started = true;
+        if (verr == ESP_OK) {
+            ESP_LOGI(kTag, "VIRTUAL I/O UI: http://%s/", g_ip_text);
+        } else {
+            ESP_LOGE(kTag, "vio_start=%s", esp_err_to_name(verr));
+        }
+    }
+#endif
     if (g_got_ip) {
         record(6, Verdict::kPass, "ip=%s mac=%02x:%02x:%02x:%02x:%02x:%02x",
                g_ip_text, g_eth_mac[0], g_eth_mac[1], g_eth_mac[2], g_eth_mac[3],
@@ -536,6 +551,10 @@ void heartbeat_task(void*) {
     for (;;) {
         ++beat;
         poll_eth_dhcp();
+#ifdef CONFIG_SP01_VIRTUAL_IO
+        ESP_LOGI(kTag, "VIRTUAL IO  DI=0x%02x DO=0x%02x (no physical IO driven)",
+                 sp01::vio_di(), sp01::vio_do());
+#endif
         ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu link=%s ip=%s", beat,
                  static_cast<unsigned long long>(esp_timer_get_time() / 1000),
                  static_cast<unsigned long>(esp_get_free_heap_size()),
@@ -547,10 +566,20 @@ void heartbeat_task(void*) {
 
 }  // namespace
 
+#ifdef CONFIG_SP01_VIRTUAL_IO
+namespace sp01 {
+// Link state for the virtual-I/O status bar.
+bool vio_link_up() { return g_driver_link; }
+}  // namespace sp01
+#endif
+
 extern "C" void app_main(void) {
     ESP_LOGI(kTag, "================================================");
     ESP_LOGI(kTag, "SP01 G1 SELF-TEST  reset=%s", reset_reason_text());
     ESP_LOGI(kTag, "machine wiring must be disconnected");
+#ifdef CONFIG_SP01_VIRTUAL_IO
+    ESP_LOGW(kTag, "VIRTUAL I/O BUILD: physical outputs stay in safe state");
+#endif
     ESP_LOGI(kTag, "================================================");
 
     stage_chip();
