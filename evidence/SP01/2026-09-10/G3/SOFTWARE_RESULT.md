@@ -1,48 +1,64 @@
 # SP01 G3 software prequalification — 2026-09-10
 
-**Verdict: SOFTWARE PREQUALIFICATION PASS. Full G3 remains PENDING board/dummy-I/O evidence.**
+**Verdict: SUPERSEDED / NOT SUFFICIENT FOR G3 EXIT.**
 
 Branch: `diag/sp01-g2-g9`
-Baseline diagnostic head: `c8bbfa8a0a92f0d899497aa4d8b2e41647b9811c`
-Test-wiring commit: `030807615d35408ff0cc3d50187acc459efa9847`
-CI run: `34472688312` / workflow run #117
+Original test-wiring commit: `030807615d35408ff0cc3d50187acc459efa9847`
+Original CI run: `34472688312` / workflow run #117
 
-## CI evidence
+## Original software result
 
-- Linux host configure/build: PASS.
-- Existing controller tests: PASS.
-- Expanded `sp01_g3_gate_tests`: PASS through CTest.
-- Host smoke: PASS.
-- ESP32-S3 build under ESP-IDF v5.5.5: PASS.
-- ESP32 bundle assembly/upload: PASS.
+The original host/ESP32 software matrix passed the then-documented normal-cycle and fault tests: AUTO/MANUAL cycle behavior, timeout/fault handling, stale/faulted weight handling, safe reset, and discharge-reference checks.
 
-## Logic covered
+## Why this evidence is now superseded
 
-Existing suite:
+Subsequent installed-machine review froze additional canonical behavior that the original G3 suite does not implement or prove:
+
+```text
+while COARSE_FILL or FINE_FILL is active:
+    sustained qualified net-weight loss -> broken bag / REJECT
+    immediately remove dosing valves, filling motor and spout aeration
+    latch REJECT for the current cycle
+    eject/push the rejected bag near 210 deg
+    suppress the later normal ~355 deg push
+
+healthy GOOD bag:
+    no 210 deg reject push
+    normal push near ~355 deg
+```
+
+Therefore a green CI result from this file's original suite must not be cited as complete G3 exit evidence.
+
+## Current software coverage status
+
+Covered by the existing suite:
 
 - normal AUTO full cycle;
-- discharge countdown scales with measured A->B interval;
 - MANUAL full fill without automatic bag push;
-- MANUAL OFF during filling returns to safe idle;
-- mode change during active filling faults with outputs OFF.
+- manual OFF during filling;
+- mode change during active filling;
+- bag/permissive/weight/timeout fault matrix;
+- forced I/O fault and reset safe-output behavior;
+- fault-clear interlock;
+- existing normal-discharge A/B timing behavior.
 
-Expanded G3 matrix:
+Not yet covered by executable controller/tests:
 
-- bag acquire timeout -> `BAG_MISSING`, outputs OFF;
-- permissive loss -> `PERMISSIVE_LOST`, outputs OFF;
-- bag lost -> `BAG_LOST`, outputs OFF;
-- stale weight at tare/coarse/fine/settle -> `WEIGHT_STALE`, outputs OFF;
-- transmitter fault during fill -> `WEIGHT_FAULT`, outputs OFF;
-- coarse timeout -> `STATE_TIMEOUT`, outputs OFF;
-- fine timeout -> `STATE_TIMEOUT`, outputs OFF;
-- discharge-reference timeout -> `STATE_TIMEOUT`, outputs OFF;
-- B-before-A discharge timing -> `DISCHARGE_TIMING_INVALID`, outputs OFF;
-- forced `IO_FAULT` -> outputs OFF;
-- reset -> `WAIT_PERMISSIVE` with outputs OFF;
-- fault clear rejected while process initiative is ON; accepted after initiative OFF.
+- finite-window broken-bag weight-loss detector;
+- immediate DO4..DO8 removal on qualified detection;
+- per-cycle GOOD/REJECT disposition latch;
+- 210 deg reject scheduling;
+- rejection suppressing later ~355 deg normal push;
+- GOOD path explicitly skipping the 210 deg reject action.
 
-## What this does not prove
+## Blocking contract
 
-This result is controller-software evidence only. It does not prove physical DI polarity, physical DO switching, TCA9554 behavior under a commanded pulse, board timing under field wiring, RS485/TLB behavior, thermal behavior, or machine operation.
+The detector semantics and immediate shutdown behavior are known. The remaining unresolved contract is the trustworthy position/timing reference that identifies the ~210 deg reject window on the installed machine.
 
-Full G3 closes only after the same dry-cycle behavior is observed on the ESP32 diagnostic/bench image with gate evidence recorded. `tools/vbench_gate.py` is provided to make that run repeatable over the virtual bench; physical dummy-I/O evidence remains separate under G2.
+Do not invent a new DI or reuse DI7/DI8. Do not derive 210 deg from the existing A/B normal-discharge references until field evidence establishes that relationship.
+
+## G3 exit rule
+
+G3 remains `ACTIVE-SW`. A replacement `RESULT.md` may claim G3 PASS only after the current canonical G3 matrix passes against the executable C++ controller and the required bench/dummy-I/O evidence in the gate plan is recorded.
+
+CI is software evidence only and does not advance G2, G2T, G4, G5, G8 or G9.
