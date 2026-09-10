@@ -1,6 +1,7 @@
 #include "sp01/tlb485.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 
 #include <array>
@@ -84,6 +85,7 @@ esp_err_t Tlb485::init(const Tlb485Config& config) noexcept {
         portENTER_CRITICAL(&mux_);
         diagnostics_.last_error = err;
         diagnostics_.comm_errors++;
+        diagnostics_.consecutive_errors++;
         portEXIT_CRITICAL(&mux_);
         ESP_LOGW(kTag, "TLB metadata not available yet: %s", esp_err_to_name(err));
     }
@@ -245,7 +247,21 @@ bool Tlb485::kg_to_register_weight(float kg, std::uint32_t& raw) const noexcept 
 }
 
 esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
-    if (!bus_mutex_ || xSemaphoreTake(bus_mutex_, pdMS_TO_TICKS(150)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    const auto started_us = static_cast<std::uint64_t>(esp_timer_get_time());
+    if (!bus_mutex_ || xSemaphoreTake(bus_mutex_, pdMS_TO_TICKS(150)) != pdTRUE) {
+        const auto duration_us = static_cast<std::uint64_t>(esp_timer_get_time()) - started_us;
+        portENTER_CRITICAL(&mux_);
+        diagnostics_.last_error = ESP_ERR_TIMEOUT;
+        diagnostics_.comm_errors++;
+        diagnostics_.consecutive_errors++;
+        diagnostics_.poll_duration_last_us = duration_us;
+        if (duration_us > diagnostics_.poll_duration_max_us) {
+            diagnostics_.poll_duration_max_us = duration_us;
+        }
+        portEXIT_CRITICAL(&mux_);
+        return ESP_ERR_TIMEOUT;
+    }
+
     esp_err_t result = ESP_OK;
 
     if (!diagnostics_.metadata_valid) {
@@ -254,6 +270,8 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
 
     std::uint16_t regs[5]{};
     if (result == ESP_OK) result = read_holding(kRegStatus, 5, regs);
+
+    const auto duration_us = static_cast<std::uint64_t>(esp_timer_get_time()) - started_us;
 
     if (result == ESP_OK) {
         const std::uint16_t status = regs[0];
@@ -273,11 +291,33 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
         snapshot_ = next;
         diagnostics_.polls_ok++;
         diagnostics_.last_error = ESP_OK;
+        diagnostics_.consecutive_errors = 0;
+        diagnostics_.poll_duration_last_us = duration_us;
+        if (duration_us > diagnostics_.poll_duration_max_us) {
+            diagnostics_.poll_duration_max_us = duration_us;
+        }
+        if (diagnostics_.last_success_us != 0 && now_us >= diagnostics_.last_success_us) {
+            const std::uint64_t interval_us = now_us - diagnostics_.last_success_us;
+            diagnostics_.success_interval_last_us = interval_us;
+            if (diagnostics_.success_interval_min_us == 0 ||
+                interval_us < diagnostics_.success_interval_min_us) {
+                diagnostics_.success_interval_min_us = interval_us;
+            }
+            if (interval_us > diagnostics_.success_interval_max_us) {
+                diagnostics_.success_interval_max_us = interval_us;
+            }
+        }
+        diagnostics_.last_success_us = now_us;
         portEXIT_CRITICAL(&mux_);
     } else {
         portENTER_CRITICAL(&mux_);
         diagnostics_.last_error = result;
         diagnostics_.comm_errors++;
+        diagnostics_.consecutive_errors++;
+        diagnostics_.poll_duration_last_us = duration_us;
+        if (duration_us > diagnostics_.poll_duration_max_us) {
+            diagnostics_.poll_duration_max_us = duration_us;
+        }
         portEXIT_CRITICAL(&mux_);
     }
 
