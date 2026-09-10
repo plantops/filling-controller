@@ -6,18 +6,23 @@ This document records the installed-machine behavior supplied during design revi
 
 ```text
 while filling is active:
-    if measured bag weight is falling because loss exceeds incoming fill
-        -> classify current bag REJECT
-        -> later push/eject this bag at approximately 210°
+    if measured bag weight falls because loss exceeds incoming fill
+        -> BROKEN_BAG_DETECTED
+        -> latch current bag disposition = REJECT
+        -> immediately stop filling outputs
+        -> carry the rejected bag to ~210°
+        -> push/eject once at ~210°
+        -> suppress the normal ~355° push
 
-healthy/good bag
-        -> keep the bag
-        -> push/eject normally at approximately 355°
+healthy/good bag:
+        -> complete normal filling
+        -> carry bag past ~210° without push
+        -> push/eject once at ~355°
 ```
 
-**Important:** 210° is the **early reject/eject position**, not a broken-bag sensor position.
+**210° is the early reject/eject position, not a broken-bag sensor position.**
 
-The broken-bag detector is derived from the weighing trajectory while filling is active.
+Broken-bag detection is derived from the TLB485 weight trajectory while filling is active. It does not require an extra broken-bag DI.
 
 ## 1. Detection semantics
 
@@ -35,17 +40,14 @@ During active filling:
 dW/dt = q_in - q_loss
 ```
 
-Therefore the confirmed broken-bag condition described by the installed-machine logic is:
+The installed-machine condition is therefore:
 
 ```text
 q_loss > q_in
-    <=> measured net weight decreases while the filling command is active
-    <=> dW/dt < 0 after suitable filtering / persistence checks
+    <=> measured net weight decreases while filling is commanded
 ```
 
-This does **not** require an extra broken-bag DI.
-
-Production implementation must not trip from one noisy derivative sample. The preferred deterministic detector is a finite-window weight loss check:
+Production logic must not trip from one noisy point derivative. Use a bounded finite-window detector over validated weight data:
 
 ```text
 fill_active = state in {COARSE_FILL, FINE_FILL}
@@ -53,176 +55,186 @@ weight_good = latest WeightSnapshot is fresh and quality==GOOD
 
 delta_w = filtered_weight(now) - filtered_weight(now - detection_window)
 
-if fill_active && weight_good && delta_w < -loss_trip_kg
-   for the required persistence/debounce interval:
+if fill_active && weight_good
+   && delta_w < -loss_trip_kg
+   && condition persists for configured debounce/persistence:
        BROKEN_BAG_DETECTED
        latch disposition = REJECT for this spout_id + cycle_id
 ```
 
-`detection_window`, `loss_trip_kg`, filtering and persistence values are **not frozen yet**. They must come from G4/G8 replay and machine evidence so normal vibration, flow pulsation and TLB filtering do not cause false rejects.
+`detection_window`, `loss_trip_kg`, filtering and persistence are commissioning values. G4/G8 must bound them from real TLB and machine traces.
 
-A point-sample derivative is diagnostic only; it is not the preferred production trip mechanism.
+## 2. Immediate action — frozen machine requirement
 
-## 2. One cycle, two disposition paths
+When `BROKEN_BAG_DETECTED` is accepted during `COARSE_FILL` or `FINE_FILL`, filling must be stopped immediately by the local controller.
 
-The controller must distinguish the disposition of the current bag:
+The fill-energy outputs that were active for filling must be removed in the same control decision:
 
 ```text
-GOOD    -> normal discharge path -> push near 355°
-REJECT  -> early reject path     -> push near 210°
+DO4 dosing.valve_a = OFF
+DO5 dosing.valve_b = OFF
+DO6 dosing.valve_c = OFF
+DO7 filling.motor  = OFF
+DO8 spout.aeration = OFF
 ```
 
-A rejected bag must not later receive the normal 355° push. The REJECT decision is latched to the affected `spout_id + cycle_id` until the bag is ejected or the cycle is otherwise terminated.
+The REJECT disposition remains latched after those outputs are removed.
+
+Do not automatically infer additional changes to `scanner.down` or `bag_detect_air` from this requirement; their post-detection behavior must follow the verified machine sequence. `bag.push` must remain OFF until the reject eject window around 210°.
+
+The immediate response is local process logic. HMI/network availability must not participate.
+
+## 3. One cycle, two disposition paths
+
+```text
+GOOD    -> no push at 210° -> normal push near 355°
+REJECT  -> immediate fill shutdown -> push near 210° -> no push at 355°
+```
 
 Required invariants:
 
 ```text
-GOOD -> never push at 210°
-REJECT -> push at 210° and suppress later 355° push
-one cycle has one final disposition
-network/HMI never owns the detection or eject timing
+one spout/cycle has one latched disposition
+REJECT cannot return to GOOD in the same cycle
+REJECT removes DO4..DO8 immediately
+REJECT never reopens fill outputs before ejection
+REJECT produces one push opportunity at ~210°
+REJECT suppresses the later ~355° push
+GOOD never produces the ~210° push
+network/HMI never owns detection, fill shutdown or eject timing
 ```
 
-## 3. Immediate action at detection
-
-The confirmed information in this review defines how the bag is **detected** and where it is later **rejected**.
-
-The exact immediate legacy output response at the instant of detection is still to be verified in G8. In particular, the project must trace whether legacy logic immediately removes dosing/motor/aeration commands or performs another bounded sequence before reaching the 210° reject window.
-
-Until that is measured, do not invent additional output channels or timing constants.
+A broken bag is a controlled reject disposition, not automatically a controller-wide `FAULT`. Separate true controller/measurement faults remain in V8.
 
 ## 4. Position references
 
-The firmware needs a trustworthy way to know when the affected spout reaches:
+The controller needs a trustworthy local timing/reference method for:
 
 ```text
 reject eject window ~210°
 normal eject window ~355°
 ```
 
-The current controller already has discharge references A/B used for the normal discharge timing path. Those references must not be assumed to provide the 210° window until the actual machine geometry is mapped.
+The current A/B discharge references support the existing normal path, but their relation to the 210° window must be frozen from machine geometry/timing evidence before production authority.
 
-For the 210° path, field commissioning must determine whether timing is derived from:
-
-```text
-an existing angular/reference signal
-previous/current revolution timing
-another legacy position signal
-a machine-level position encoder/cam
-or another verified source
-```
-
-No new DI is allocated merely from this requirement.
+No new DI is allocated merely because the reject path exists.
 
 ## 5. Output authority
 
-Current SP01 output semantics include:
+Current SP01 semantics use the same physical action for both ejections:
 
 ```text
 DO3 = bag.push
 ```
 
-Both reject and normal disposition use the same semantic push/eject action at different rotor positions:
+Therefore:
 
 ```text
 DO3 @ ~210° only when disposition == REJECT
 DO3 @ ~355° only when disposition == GOOD
 ```
 
-This requirement does not create a new `OUT_REJECT` output.
-
-The as-built actuator/electrical path still has to be verified before production output authority is enabled.
+No extra `OUT_REJECT` channel is required by the known process behavior.
 
 ## 6. Current executable gap
 
-The current `sp01::Controller` implements the healthy-bag path:
+The current `sp01::Controller` still implements only the healthy-bag normal discharge path. G3 is not complete until executable logic and tests cover:
 
 ```text
-SETTLE -> WAIT_DISCHARGE -> PUSH -> COMPLETE
-```
-
-It does not yet implement:
-
-```text
-filtered negative-weight detection while filling
-per-cycle GOOD/REJECT disposition latch
+finite-window negative-weight detection
+latched GOOD/REJECT disposition
+immediate DO4..DO8 shutdown on REJECT
+no fill-output reactivation after reject
 210° early reject scheduling
-suppression of the later 355° push after reject
+one reject push
+suppression of the later 355° push
 ```
 
-Therefore G3 remains software-active until these behaviors are represented and tested deterministically.
+## 7. Canonical-view requirements
 
-## 7. Timeline / digital-twin requirement
-
-V1 and V11 should record:
+The following standard views must show the same behavior:
 
 ```text
-cycle_id
-spout_id
-fill_active
-raw/filtered weight
-weight delta over detection window
-broken_bag_detected
-reject_latched
-detection timestamp
-reject_due / reject_push_on / reject_push_off around 210°
-normal_discharge_due / normal_push_on / normal_push_off around 355°
-final disposition = REJECTED | NORMAL
+V1 Runtime Timeline
+   weight trace -> detector decision -> DO4..DO8 OFF -> reject_due -> push@210 -> no push@355
+
+V2 State Logic Matrix
+   COARSE/FINE may branch to REJECT disposition; fill outputs removed immediately
+
+V3 Interlock Flow
+   broken-bag detector is a process branch, not a fake 210° sensor
+
+V4 Interlock Equations
+   BROKEN_BAG = fill_active && weight_good && bounded_negative_delta
+
+V8 Exception/Fault Matrix
+   controlled REJECT is distinct from WeightFault/WeightStale/IoFault
+
+V11 Digital Twin HMI
+   show raw/filtered weight, reject latch, immediate fill shutdown and selected eject window
+
+V12 Weighing Signal Quality
+   owns filter/window/noise evidence and threshold derivation
+
+V13 Eight-Spout Topology
+   reject state is associated with the correct spout_id + cycle_id while rotating
 ```
 
-This allows the detector threshold/filter to be tuned from real traces rather than guessed.
+## 8. Gate requirements
 
-## 8. G3/G4/G8 test requirements
+### G3 — software/dry FSM
 
-### G3 software
-
-Use deterministic synthetic/replay traces:
+Required deterministic cases:
 
 ```text
-normal increasing weight -> GOOD
-noisy but increasing weight -> GOOD
-single negative spike -> must not reject
-sustained negative finite-window delta while filling -> REJECT
-negative delta outside filling states -> no broken-bag decision
-REJECT latched -> 210° push only, no later 355° push
-GOOD -> no 210° push, normal 355° push
+normal increasing weight                       -> GOOD
+noisy but net increasing weight                -> GOOD
+single negative spike                          -> no reject
+sustained negative finite-window delta in fill -> REJECT
+negative delta outside fill                    -> no broken-bag decision
+REJECT decision                                -> DO4..DO8 OFF immediately
+REJECT latched                                 -> no fill output reopens
+REJECT                                         -> one push at simulated ~210°, none at ~355°
+GOOD                                           -> no push at ~210°, one normal push at ~355°
 ```
 
-### G4 weighing bench
+For software evidence, record detector decision time and output-image transition time. The acceptable physical/timing limit is frozen later from measured machine evidence rather than invented here.
 
-Measure enough signal behavior to bound:
+### G4 — TLB bench
+
+Measure the signal characteristics needed to make the detector credible:
 
 ```text
 sample/update rate
-TLB filtering
-zero and dynamic noise
-latency/jitter
-finite-window weight-delta noise
+TLB filtering profile
+latency and jitter
+dynamic noise / vibration response
+finite-window negative-delta noise envelope
+stale/fault/reconnect behavior
 ```
 
-### G8 shadow
+### G7 — bench review
 
-Capture real machine cycles including, where plant procedure permits, broken-bag/reject examples. Freeze:
+The view pack and executable tests must agree on the detector, immediate shutdown, disposition latch and two eject paths.
+
+### G8 — shadow
+
+With real DI + TLB weight and new DO physically isolated, compare against legacy:
 
 ```text
-detection_window
-loss_trip_kg
-persistence/debounce
-210° timing reference and actuator lead
-355° timing reference and actuator lead
-legacy immediate response at broken-bag detection
+broken-bag detection timestamp
+legacy fill-output shutdown timestamp
+SP01 desired DO4..DO8 shutdown timestamp
+reject disposition latch
+210° reject timing
+355° normal timing
+wrong/duplicate push absence
 ```
 
-Angles remain approximate until measured commissioning values are frozen.
+Freeze `detection_window`, `loss_trip_kg`, persistence, filters, angular windows and actuator lead from recorded evidence.
 
-## 9. Gate impact
+### G9 — live pilot
 
-```text
-G3   implement/test deterministic weight-loss detector and GOOD/REJECT routing
-G4   characterize TLB dynamic signal/noise needed for detector thresholds
-G7   review detector, disposition latch and two eject paths
-G8   shadow-compare broken-bag detection + 210° reject and healthy ~355° discharge
-G9   live pilot validates both paths under local commissioning procedure
-```
+A locally authorized live pilot must demonstrate both normal and reject paths, including immediate filling shutdown for a detected broken bag, with rollback and known-good spare available.
 
-This document is the canonical description of broken-bag detection and disposition until more precise as-built evidence is frozen.
+This document is the canonical broken-bag process contract until later measured evidence refines its numeric parameters.
