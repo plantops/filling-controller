@@ -138,4 +138,16 @@ config SP01_BENCH_DO_TEST_ENABLE
         This exists only for disconnected bench validation of DO1..DO8. Never
         use it with machine actuators, solenoids or contactors connected.
 
+config SP01_VIRTUAL_IO
+    bool "Enable virtual I/O with web UI (bench only)"
+    default n
+    help
+        Substitutes browser-driven virtual channels for physical DI and DO so
+        controller logic can be exercised with no dry contacts, lamps or 24 V
+        supply. While enabled, the TCA9554 is written to its safe latch once at
+        startup and never written again: a virtual DO drives no pin.
+
+        Bench and remote-development use only. Never enable on a node connected
+        to machine wiring.
+
 endmenu
