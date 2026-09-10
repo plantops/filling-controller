@@ -1,0 +1,56 @@
+name: edge-web
+
+on:
+  push:
+    branches: [main, diag/sp01-g2-g9]
+    paths:
+      - 'edge/**'
+      - 'web/**'
+      - '.github/workflows/edge-web.yml'
+  pull_request:
+    paths:
+      - 'edge/**'
+      - 'web/**'
+      - '.github/workflows/edge-web.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  collector:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge/collector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: edge/collector/go.mod
+          cache-dependency-path: edge/collector/go.mod
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+
+  canonical-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify 13-view static console
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('web/engineering-console/index.html')
+          text = p.read_text(encoding='utf-8')
+          missing = [f'V{i}' for i in range(1, 14) if f'V{i}' not in text]
+          if missing:
+              raise SystemExit(f'missing canonical views: {missing}')
+          if 'supervisory only' not in text.lower():
+              raise SystemExit('missing supervisory-only boundary')
+          if "method:'POST'" in text or 'method="post"' in text.lower():
+              raise SystemExit('engineering console must remain read-only')
+          print('13-view static console check: PASS')
+          PY
