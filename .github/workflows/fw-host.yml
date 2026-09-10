@@ -3,7 +3,7 @@ name: fw
 on:
   workflow_dispatch:
   push:
-    branches: [main, fw-sp01-v0.1]
+    branches: [main, fw-sp01-v0.1, 'diag/**']
     paths:
       - 'firmware/**'
       - 'VERSION'
@@ -61,7 +61,6 @@ jobs:
           path: firmware/esp32-s3
 
       - name: Assemble ESP32 flash bundle
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -91,7 +90,6 @@ jobs:
           find "$DST" -maxdepth 2 -type f -print | sort
 
       - name: Upload ESP32 flash bundle
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: sp01-esp32-s3-${{ github.sha }}
