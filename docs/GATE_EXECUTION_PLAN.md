@@ -2,323 +2,287 @@
 
 Branch: `diag/sp01-g2-g9`
 Baseline: `c8bbfa8a0a92f0d899497aa4d8b2e41647b9811c`
-Date started: 2026-09-10
+Updated: 2026-09-10
 
 ## Operating rule
 
-Advance a gate only from recorded evidence. CI success is not physical evidence. Machine actuators remain disconnected until G8 shadow is complete and G9 live connection is explicitly authorized locally.
+Advance a gate only from evidence appropriate to that gate. CI/simulation may close software gates; they never substitute for physical I/O, TLB, thermal, shadow or live-machine evidence.
 
-Status values: `PASS`, `ACTIVE`, `ACTIVE-SW`, `BLOCKED-HW`, `PENDING`, `FAIL`.
+Machine actuators remain disconnected until G8 shadow is complete and G9 live connection is explicitly authorized locally.
 
-## Gate status
+## Current gate state
 
 | Gate | Scope | Status | Exit evidence |
 |---|---|---|---|
-| G0 | Build | PASS | clean host tests + ESP32-S3 build |
-| G1 | Safe board bring-up | PASS (self-test scope) | boot, TCA9554 safe latch, DI idle, W5500 SPI/link/DHCP, no reset in capture |
-| G2 | Physical dummy I/O | ACTIVE | 1 h clean soak, DI1..8 dry-contact truth table, DO1..8 dummy-load OFF/ON/reset-OFF, sustained Ethernet path |
-| G2T | Thermal/serviceability | BLOCKED-HW | measured installation temp, elevated-temp soak, reset/fault safe-output evidence, spare-swap/config recovery drill |
-| G3 | Dry FSM / process logic | ACTIVE-SW | deterministic AUTO/MANUAL cycles, fault matrix, broken-bag detection, immediate fill shutdown, GOOD/~355° and REJECT/~210° paths |
-| G4 | TLB485 bench | BLOCKED-HW | digital kg/status, poll latency/jitter/error rate, filter/noise envelope, stale/disconnect/reconnect, switching-noise trial |
+| G0 | Build | PASS | host tests + ESP32-S3 build |
+| G1 | Safe board bring-up | PASS | boot, 16 MB flash, TCA9554 safe, DI idle, W5500 SPI/link/DHCP, stable capture |
+| G2 | Physical dummy I/O + Ethernet | ACTIVE | 1 h soak; DI1..8 OPEN/CLOSED/OPEN; DO1..8 dummy-load OFF/ON/reset-OFF; sustained Ethernet |
+| G2T | Thermal/serviceability | BLOCKED-HW | measured installation temp, elevated-temp soak, reset/fault safe outputs, spare swap/config recovery |
+| G3 | Dry FSM/process logic | PASS | deterministic C++ AUTO/MANUAL + fault matrix + GOOD/~355 and REJECT/~210 software routes |
+| G4 | TLB485 dynamic weighing | BLOCKED-HW | kg/status, update rate, latency/jitter, filter/noise envelope, stale/disconnect/reconnect, switching-noise trial |
 | G5 | Calibration | BLOCKED-HW | zero, 20 kg check, 50 kg span, zero/20/50 verification |
-| G6 | Network loss | PENDING | local control result unchanged when browser/network disappears during every relevant state |
-| G7 | Bench design review | PENDING | canonical view pack + measured evidence + red-team R1, no unresolved critical finding |
-| G8 | Shadow on machine | BLOCKED-HW | real DI + TLB weight, new DO isolated, timeline comparison with legacy for GOOD and REJECT cycles, red-team R2 |
-| G9 | Live SP01 pilot | BLOCKED-HW | controlled DO connection, rollback and spare ready, both normal and reject paths accepted locally |
+| G6 | Network-loss independence | PENDING | local controller/weighing behavior unchanged when browser/network disappears and returns |
+| G7 | Bench design review | PENDING | V1..V13 reconciled with executable + measured evidence; red-team R1 no unresolved critical finding |
+| G8 | Machine shadow | BLOCKED-HW | real DI + TLB, new DO isolated, legacy-vs-SP01 timeline for GOOD and REJECT, red-team R2 |
+| G9 | One-spout live pilot | BLOCKED-HW | controlled DO connection, rollback/spare ready, local acceptance of GOOD and REJECT paths |
 
-## Canonical views used by the gates
+G3 evidence: `evidence/SP01/2026-09-10/G3/SOFTWARE_RESULT.md`.
 
-The normative index is `ENGINEERING_VIEW_INDEX.md`.
+## Canonical view ownership
+
+Primary view pack: `SP01_CANONICAL_VIEWS.md`.
 
 ```text
+G0   V6
+G1   V7 + V10
 G2   V1 + V7
-G2T  V1 + V7 + V10 + V13
-G3   V1 + V2 + V3 + V4 + V5 + V6 + V8 + V12
+G2T  V1 + V7 + V10
+G3   V2 + V3 + V4 + V6 + V8
 G4   V1 + V10 + V12
-G5   V10 + V11 + V12
-G6   V1 + V6 + V11
-G7   V1..V13 consolidated review
-G8   V1 + V2 + V7 + V8 + V11 + V12 + V13
-G9   V1 + V7 + V8 + V11 + V13
+G5   V10 + V12
+G6   V5 + V10 + V11
+G7   V1..V13 reconciled
+G8   V1 + V7 + V8 + V11 + V12 + V13
+G9   V1 + V8 + V11
 ```
 
-No diagram or HMI view may be used as gate proof unless it is backed by executable or measured evidence appropriate to that gate.
+No diagram or HMI view is gate proof unless backed by the executable or measured evidence owned by that gate.
 
-## Frozen broken-bag process contract
+## Frozen broken-bag contract
 
 ```text
-Detection:
-  while COARSE_FILL or FINE_FILL is active,
-  measured weight falls persistently because loss > incoming fill.
+while COARSE_FILL or FINE_FILL:
+    qualified persistent net-weight loss
+    -> latch disposition REJECT
+    -> DO4..DO8 OFF in same control decision
+    -> REJECT_WAIT
+    -> one DO3 bag.push at ~210 deg reject window
+    -> no later ~355 deg push
 
-On accepted detection:
-  latch disposition = REJECT for this spout_id + cycle_id
-  immediately command OFF:
-    DO4 dosing.valve_a
-    DO5 dosing.valve_b
-    DO6 dosing.valve_c
-    DO7 filling.motor
-    DO8 spout.aeration
-
-Then:
-  REJECT -> one bag.push near ~210°, suppress later ~355° push
-  GOOD   -> no push near ~210°, one normal bag.push near ~355°
+healthy bag:
+    normal fill/cutoff/settle
+    -> disposition GOOD
+    -> ignore ~210 deg reject window
+    -> one normal DO3 bag.push near ~355 deg
 ```
 
-Detector thresholds and angular timing remain commissioning values. A one-sample negative derivative is not sufficient evidence.
+210° is a reject/eject position, not a broken-bag sensor. Broken-bag detection comes from the TLB485 weight trajectory while filling.
+
+Detector thresholds, filtering/persistence and real 210/355 timing/lead are not frozen by G3. They belong to G4/G8.
 
 ## G2 — physical dummy I/O
 
-Machine wiring disconnected.
-
-Required:
+Machine wiring remains disconnected.
 
 ```text
-1 h heartbeat/network soak
-DI1..8 OPEN -> CLOSED -> OPEN one channel at a time
-DO1..8 dummy-load one-hot pulse
-reset -> all physical DO safe
-sustained HMI/API Ethernet traffic while heartbeat continues
+1. Run 1 h heartbeat/network soak.
+2. DI1..8 one at a time: OPEN -> CLOSED -> OPEN; record actual channel mapping/cross-talk.
+3. DO1..8 one at a time using approved dummy load: OFF -> pulse ON -> auto/reset OFF; record electrical result.
+4. Generate sustained local HMI/API Ethernet traffic during the test.
+5. Record reset reason, link/IP behavior and anomalies.
 ```
 
-Evidence goes to `evidence/SP01/<date>/G2/RESULT.md`.
+PCB LEDs alone do not close G2.
 
-## G2T — thermal and serviceability
-
-Required physical evidence:
+## G2T — thermal/serviceability
 
 ```text
-actual controller/TLB mounting temperature
-elevated-temperature representative I/O + network + RS485 load
-reset/brownout/fault behavior
+measure actual controller/TLB mounting temperature
+controlled elevated-temperature operation
+representative I/O + network + RS485 traffic
+boot/reset/brownout/fault behavior
 safe-output verification
-one spare-controller replacement drill
-approved config recovery
-TLB calibration unchanged by ESP replacement
+pre-flashed spare-controller replacement drill
+restore approved config
+verify ESP replacement does not alter TLB calibration
 ```
 
-Do not invent a temperature qualification beyond measured hardware evidence.
+No temperature/lifetime claim beyond measured evidence.
 
-## G3 — dry FSM and process logic
+## G3 — dry FSM/process logic — PASS
 
-G3 is the main software gate before TLB/machine authority.
+The C++ controller now represents the two bag dispositions and broken-bag shutdown path.
 
-Required deterministic matrix:
+Automated matrix includes:
 
 ```text
-AUTO healthy full cycle
-MANUAL healthy full cycle; no automatic bag.push
-manual OFF during filling
+AUTO normal full cycle
+MANUAL normal cycle; no automatic push
+manual OFF during fill
 mode change during active cycle
-auto permissive loss
-bag acquire timeout
-bag lost after acquisition
-WeightStale at prefill/coarse/fine/settle
-WeightFault
-coarse timeout
-fine timeout
-discharge-reference timeout
+permissive loss
+bag missing / bag lost
+weight stale / weight fault
+coarse/fine/discharge timeouts
 invalid discharge timing
-forced I/O fault/reset -> safe output image
-fault clear rejected/accepted under defined conditions
+forced I/O fault and fault-clear rules
+
+increasing weight -> no false reject
+single negative spike -> no reject
+persistent qualified loss -> REJECT
+REJECT -> DO4..DO8 OFF in same tick
+REJECT -> ~210 semantic window -> one DO3 push
+REJECT -> no later normal path
+GOOD -> ignores ~210 semantic window
+GOOD -> normal A/B discharge -> DO3 push
+MANUAL broken bag -> stop fill, no automatic push
+reject-window timeout -> bounded fault-safe result
 ```
 
-Broken-bag cases are mandatory:
-
-```text
-normal increasing weight                       -> GOOD
-noisy but net increasing weight                -> GOOD
-single negative spike                          -> no REJECT
-sustained negative finite-window delta in fill -> REJECT
-negative delta outside fill                    -> no broken-bag decision
-REJECT accepted                                -> DO4..DO8 OFF in same control decision
-REJECT latched                                 -> fill outputs never reopen in that cycle
-REJECT                                         -> one push at simulated ~210°, none at ~355°
-GOOD                                           -> no push at ~210°, one push at ~355°
-wrong/previous cycle reject event              -> must not eject another spout/cycle
-late reject decision                           -> deterministic bounded behavior
-missing/invalid 210° reference                 -> deterministic bounded behavior
-```
-
-Software evidence must record:
-
-```text
-detector decision timestamp
-output-image transition timestamp
-disposition latch
-210°/355° simulated timing result
-number of push commands per cycle
-```
-
-G3 cannot PASS while the current executable controller still lacks the reject branch.
+`PositionSnapshot.reject_window` is a semantic software boundary only. G3 does not claim how the installed machine derives 210°.
 
 ## G4 — TLB485 dynamic weighing
 
-Required measurements:
+Connect the actual TLB485/load-cell chain on bench and measure:
 
 ```text
-0 / 20 / 40 / 49 / 50 kg readings as applicable
-actual update frequency
-latency and jitter
-TLB filtering profile
-noise during stationary and representative vibration/switching
-finite-window negative-delta noise envelope
-Modbus error count
+actual digital kg/status
+sample/update frequency
+poll/response latency and jitter
+Modbus errors
+TLB filter/profile
+stationary and dynamic/vibration noise
+high-water / finite-window loss noise envelope
 stale detection
-disconnect/reconnect behavior
+disconnect/reconnect recovery
+representative switching-noise behavior
 ```
 
-These measurements are used to freeze broken-bag detector parameters rather than guessing `loss_trip_kg`, window or debounce.
+G4 supplies evidence for detector threshold/persistence; do not tune from simulation values.
 
 ## G5 — calibration
 
-Required:
-
 ```text
-zero
-20 kg check
-50 kg span
-verify zero / 20 / 50 kg
-record TLB identity, profile, operator and result
+empty saddle -> stable -> zero
+20.000 kg check
+50.000 kg -> span
+remove -> verify zero
+verify 20 kg
+verify 50 kg
+record TLB identity/profile/operator/result
 ```
 
-Calibration is separate from recipe target compensation and from per-cycle tare.
+Calibration is separate from recipe target compensation and any future bounded cycle tare.
 
 ## G6 — network-loss independence
 
-During each relevant FSM phase, remove browser/network access and prove:
+The controller core has no browser/cloud dependency; the new edge collector and Cloudflare-ready engineering console are read-only supervisory components. Physical/runtime G6 still requires proving on the board that network loss does not disturb the local runtime.
+
+Test each relevant phase:
 
 ```text
-control loop continues locally
-weight acquisition continues locally
-outputs follow local FSM only
-network return does not reset/restart a cycle
+remove browser/network access
+local FSM continues
+TLB acquisition continues
+physical outputs remain owned by local FSM
+restore network
+no cycle reset/restart or remote output injection
 ```
 
-HMI is supervisory only.
+Collector API is GET/SSE only. No actuator route is present.
 
 ## G7 — canonical bench review
 
-G7 is not another simulation test. It is the review checkpoint that all standard views agree with code and measured evidence.
-
-Required review pack:
+Review `SP01_CANONICAL_VIEWS.md` V1..V13 against:
 
 ```text
-V1 runtime timeline
-V2 state matrix
-V3 interlock flow
-V4 predicates/equations
-V5 dependency graph
-V6 executable controller
-V7 physical I/O
-V8 exception/fault/reject matrix
-V9 supervisory projection
-V10 communication/data map
-V11 digital-twin HMI
-V12 weighing/calibration/filter/tare view
-V13 eight-spout topology
+controller source and automated tests
+G1/G2/G2T evidence
+G4/G5 weighing evidence
+G6 independence evidence
+board terminal map
+edge/collector read-only boundary
+web/engineering-console measured-data-only behavior
 ```
 
-Red-team R1 checks inconsistencies, undocumented assumptions and failure behavior.
+Red-team R1 checks contradictions, unmeasured constants, output ownership and failure behavior.
 
-## G8 — machine shadow, no new output authority
+## G8 — machine shadow; new DO physically isolated
 
 Precondition: G2, G2T, G3, G4, G5, G6 and G7 PASS.
 
-Connect real DI and TLB485 weight, keep new physical DO isolated.
+Connect real DI and real TLB weight; keep SP01 physical actuator outputs isolated. Record timestamp-aligned legacy and SP01 desired behavior.
 
-Capture identical legacy and SP01-shadow cycles. For broken-bag behavior record:
+For GOOD cycles:
 
 ```text
-spout_id + cycle_id
-raw/filtered weight trace
-detector decision timestamp
-legacy immediate fill shutdown timestamp
-SP01 desired DO4..DO8 shutdown timestamp
-legacy reject push near ~210°
-SP01 desired reject push near ~210°
-absence of later ~355° push for REJECT
-healthy bag normal ~355° push
+weight/fill/cutoff/settle
+skip reject ~210
+legacy normal push ~355
+SP01 desired push ~355
+```
+
+For REJECT cycles:
+
+```text
+raw/filtered TLB trace
+legacy broken-bag decision
+SP01 detector decision
+legacy immediate fill shutdown
+SP01 desired DO4..DO8 shutdown
+legacy reject push ~210
+SP01 desired reject push ~210
+absence of later ~355 push
 ```
 
 G8 freezes from measurements:
 
 ```text
-detection window
-loss threshold
-filter/persistence parameters
-210° reject window and actuator lead
-355° normal window and actuator lead
+broken_bag_loss_trip_kg
+broken_bag_persist_us
+TLB filter assumptions
+210° timing/reference + actuator lead
+355° timing/reference + actuator lead
 post-detection scanner/bag-detect behavior
 late-detection behavior
 ```
 
-Red-team R2 reviews the final shadow evidence before live authority.
+Red-team R2 reviews this evidence before live authority.
 
-## G9 — controlled live SP01 pilot
-
-One spout only.
+## G9 — controlled one-spout live pilot
 
 Preconditions:
 
 ```text
 G8 accepted
-legacy rollback path available
-known-good spare available
 approved as-built wiring/config
-local commissioning/LOTO/startup authorization
+legacy rollback physically available
+known-good spare ready
+local permit/LOTO/startup authorization
 ```
 
-Live acceptance must prove both routes:
+Enable one SP01 only. Validate both routes from recorded evidence:
 
 ```text
-GOOD:
-  normal fill
-  no push ~210°
-  one push ~355°
-
-REJECT:
-  accepted weight-loss detection
-  immediate DO4..DO8 shutdown
-  no fill restart in same cycle
-  one push ~210°
-  no second push ~355°
+GOOD: normal fill -> no ~210 push -> one ~355 push
+REJECT: detector -> immediate DO4..DO8 OFF -> no fill restart -> one ~210 push -> no ~355 push
 ```
 
-Stop the pilot on unexplained output, wrong disposition, duplicate/missed push, unstable weight transport, reset/brownout, timing divergence or failed rollback.
+Stop on unexplained output, wrong disposition, missed/duplicate push, unstable weight, reset/brownout, timing divergence or unavailable rollback.
 
-G9 passes only from recorded local acceptance evidence.
+G9 passes only from local site acceptance evidence.
 
 ## Evidence layout
 
 ```text
-evidence/SP01/<date>/G2/
-evidence/SP01/<date>/G2T/
-evidence/SP01/<date>/G3/
-evidence/SP01/<date>/G4/
-evidence/SP01/<date>/G5/
-evidence/SP01/<date>/G6/
-evidence/SP01/<date>/G7/
-evidence/SP01/<date>/G8/
-evidence/SP01/<date>/G9/
+evidence/SP01/<date>/G2/RESULT.md
+evidence/SP01/<date>/G2T/RESULT.md
+evidence/SP01/<date>/G3/...
+evidence/SP01/<date>/G4/RESULT.md
+evidence/SP01/<date>/G5/RESULT.md
+evidence/SP01/<date>/G6/RESULT.md
+evidence/SP01/<date>/G7/RESULT.md
+evidence/SP01/<date>/G8/RESULT.md
+evidence/SP01/<date>/G9/RESULT.md
 ```
 
-Every `RESULT.md` records firmware SHA, board ID, setup, measurements, anomalies, operator and PASS/FAIL rationale.
+Every physical result records firmware SHA, board/spout ID, setup, measurements/log references, anomalies, operator and PASS/FAIL rationale.
 
-## Current boundary
+## Current blocking chain
 
 ```text
-G0   PASS
-G1   PASS
-G2   ACTIVE — physical bench evidence pending
-G2T  BLOCKED-HW
-G3   ACTIVE-SW — reject branch/immediate fill shutdown not yet executable
-G4   BLOCKED-HW
-G5   BLOCKED-HW
-G6   PENDING
-G7   PENDING
-G8   BLOCKED-HW
-G9   BLOCKED-HW
+software: G3 PASS; edge collector + 13-view FE prepared for G6/G7
+physical: G2 -> G2T -> G4 -> G5 -> G6 -> G7 -> G8 -> G9
+          ^
+          next true commissioning blocker
 ```
-
-The next engineering effort stays centered on canonical views and gate evidence. No new feature is promoted simply because it appears in a team proposal.
