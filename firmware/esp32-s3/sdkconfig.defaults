@@ -4,13 +4,25 @@ CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 
-# G1 diagnostic: native USB Serial/JTAG is the only console.
+# Native USB Serial/JTAG is the console. Verified working on the physical board
+# 2026-09-10: full boot log captured over this path.
 # CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
-# Conservative boot settings for physical bring-up.
-# CONFIG_ESPTOOLPY_FLASHFREQ_80M is not set
-CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+# Module is ESP32-S3-WROOM-1U-N16R8: 16 MB flash.
 # CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# CONFIG_ESPTOOLPY_FLASHFREQ_80M is not set
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+
+# Custom table adds a coredump partition so a crash before console init still
+# leaves a readable backtrace in flash.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# W5500 SPI Ethernet support, used by the G1 SPI/link stages.
+CONFIG_ETH_USE_SPI_ETHERNET=y
+CONFIG_ETH_SPI_ETHERNET_W5500=y
