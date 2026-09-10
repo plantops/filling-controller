@@ -47,28 +47,30 @@ q_loss > q_in
     <=> measured net weight decreases while filling is commanded
 ```
 
-Production logic must not trip from one noisy point derivative. Use a bounded finite-window detector over validated weight data:
+Production logic must not trip from one noisy point derivative. The commissioning branch implements a bounded loss detector using a running peak and persistence over new TLB samples. It is intentionally disabled by default until measured G4/G8 values are supplied.
+
+Conceptually:
 
 ```text
 fill_active = state in {COARSE_FILL, FINE_FILL}
 weight_good = latest WeightSnapshot is fresh and quality==GOOD
 
-delta_w = filtered_weight(now) - filtered_weight(now - detection_window)
+loss = recent_peak_weight - current_weight
 
 if fill_active && weight_good
-   && delta_w < -loss_trip_kg
-   && condition persists for configured debounce/persistence:
+   && loss >= broken_bag_loss_trip_kg
+   && loss persists for broken_bag_persist_us across new samples:
        BROKEN_BAG_DETECTED
        latch disposition = REJECT for this spout_id + cycle_id
 ```
 
-`detection_window`, `loss_trip_kg`, filtering and persistence are commissioning values. G4/G8 must bound them from real TLB and machine traces.
+`broken_bag_loss_trip_kg`, `broken_bag_persist_us`, TLB filtering and the production noise envelope are commissioning values. G4/G8 must freeze them from real traces.
 
 ## 2. Immediate action — frozen machine requirement
 
-When `BROKEN_BAG_DETECTED` is accepted during `COARSE_FILL` or `FINE_FILL`, filling must be stopped immediately by the local controller.
+When `BROKEN_BAG_DETECTED` is accepted during `COARSE_FILL` or `FINE_FILL`, filling is stopped immediately by the local controller.
 
-The fill-energy outputs that were active for filling must be removed in the same control decision:
+The fill-energy outputs are removed in the same controller decision:
 
 ```text
 DO4 dosing.valve_a = OFF
@@ -80,15 +82,15 @@ DO8 spout.aeration = OFF
 
 The REJECT disposition remains latched after those outputs are removed.
 
-Do not automatically infer additional changes to `scanner.down` or `bag_detect_air` from this requirement; their post-detection behavior must follow the verified machine sequence. `bag.push` must remain OFF until the reject eject window around 210°.
+Current executable behavior keeps `scanner.down` and `bag_detect_air` active in `REJECT_WAIT` and keeps `bag.push` OFF until the semantic reject window is reached. This is a software working model to be checked against G8 machine evidence before live authority.
 
-The immediate response is local process logic. HMI/network availability must not participate.
+The immediate response is local process logic. HMI/network availability does not participate.
 
 ## 3. One cycle, two disposition paths
 
 ```text
 GOOD    -> no push at 210° -> normal push near 355°
-REJECT  -> immediate fill shutdown -> push near 210° -> no push at 355°
+REJECT  -> immediate fill shutdown -> REJECT_WAIT -> push near 210° -> no push at 355°
 ```
 
 Required invariants:
@@ -104,20 +106,26 @@ GOOD never produces the ~210° push
 network/HMI never owns detection, fill shutdown or eject timing
 ```
 
-A broken bag is a controlled reject disposition, not automatically a controller-wide `FAULT`. Separate true controller/measurement faults remain in V8.
+A broken bag is a controlled reject disposition, not automatically a controller-wide `FAULT`.
 
 ## 4. Position references
 
-The controller needs a trustworthy local timing/reference method for:
+The controller needs trustworthy local timing/reference methods for:
 
 ```text
 reject eject window ~210°
 normal eject window ~355°
 ```
 
-The current A/B discharge references support the existing normal path, but their relation to the 210° window must be frozen from machine geometry/timing evidence before production authority.
+The existing A/B discharge references support the current normal path. Their relation to the 210° reject window is not assumed.
 
-No new DI is allocated merely because the reject path exists.
+For software conformance the controller receives a semantic:
+
+```text
+PositionSnapshot.reject_window
+```
+
+That semantic boundary allows G3 testing without inventing a ninth DI or a fake 210° sensor. G8 must determine how the installed machine produces this semantic timing window from real references/geometry.
 
 ## 5. Output authority
 
@@ -136,48 +144,55 @@ DO3 @ ~355° only when disposition == GOOD
 
 No extra `OUT_REJECT` channel is required by the known process behavior.
 
-## 6. Current executable gap
+## 6. Current executable status
 
-The current `sp01::Controller` still implements only the healthy-bag normal discharge path. G3 is not complete until executable logic and tests cover:
+The commissioning branch now implements the software model needed for G3:
 
 ```text
-finite-window negative-weight detection
-latched GOOD/REJECT disposition
-immediate DO4..DO8 shutdown on REJECT
-no fill-output reactivation after reject
-210° early reject scheduling
-one reject push
-suppression of the later 355° push
+BagDisposition {UNDECIDED, GOOD, REJECT}
+State::RejectWait
+bounded broken-bag weight-loss detector
+same-tick DO4..DO8 removal when REJECT is accepted
+latched REJECT disposition
+semantic PositionSnapshot.reject_window
+DO3 push from REJECT_WAIT only at reject_window
+normal A/B discharge path for GOOD bags
+completed REJECT cycle does not re-enter the normal discharge path
 ```
+
+The detector defaults disabled because production thresholds are not yet measured. `reject_wait_timeout_us` also remains a commissioning/configuration value. This is deliberate: software semantics are implemented, but G4/G8 still own the real signal/timing parameters.
 
 ## 7. Canonical-view requirements
 
-The following standard views must show the same behavior:
+The standard view pack is `SP01_CANONICAL_VIEWS.md`. Broken-bag behavior must appear consistently in:
 
 ```text
 V1 Runtime Timeline
-   weight trace -> detector decision -> DO4..DO8 OFF -> reject_due -> push@210 -> no push@355
+   weight loss -> detector decision -> DO4..DO8 OFF -> reject_due -> push@210 -> no push@355
 
-V2 State Logic Matrix
-   COARSE/FINE may branch to REJECT disposition; fill outputs removed immediately
+V2 State/Process Matrix
+   COARSE/FINE branch to REJECT_WAIT; fill energy removed immediately
 
-V3 Interlock Flow
-   broken-bag detector is a process branch, not a fake 210° sensor
+V3 Interlock/Process Flow
+   detector -> REJECT latch -> wait 210 -> push -> complete
 
-V4 Interlock Equations
-   BROKEN_BAG = fill_active && weight_good && bounded_negative_delta
+V4 Interlock Predicates
+   broken-bag predicate + REJECT_PUSH_ALLOWED vs NORMAL_PUSH_ALLOWED
+
+V6 Executable Engine
+   disposition + detector + RejectWait + PositionSnapshot
 
 V8 Exception/Fault Matrix
-   controlled REJECT is distinct from WeightFault/WeightStale/IoFault
+   controlled REJECT distinct from controller/measurement faults
 
 V11 Digital Twin HMI
-   show raw/filtered weight, reject latch, immediate fill shutdown and selected eject window
+   detector evidence, disposition, desired/physical DO and selected eject path
 
 V12 Weighing Signal Quality
-   owns filter/window/noise evidence and threshold derivation
+   owns noise/filter/persistence/threshold evidence
 
 V13 Eight-Spout Topology
-   reject state is associated with the correct spout_id + cycle_id while rotating
+   every reject event bound to the correct spout_id + cycle_id
 ```
 
 ## 8. Gate requirements
@@ -187,35 +202,36 @@ V13 Eight-Spout Topology
 Required deterministic cases:
 
 ```text
-normal increasing weight                       -> GOOD
-noisy but net increasing weight                -> GOOD
+normal increasing weight                       -> no false reject
 single negative spike                          -> no reject
-sustained negative finite-window delta in fill -> REJECT
+sustained qualified weight loss in fill        -> REJECT
 negative delta outside fill                    -> no broken-bag decision
-REJECT decision                                -> DO4..DO8 OFF immediately
+REJECT decision                                -> DO4..DO8 OFF in same tick
 REJECT latched                                 -> no fill output reopens
 REJECT                                         -> one push at simulated ~210°, none at ~355°
 GOOD                                           -> no push at ~210°, one normal push at ~355°
+MANUAL broken bag                              -> fill stops, no automatic bag push
+reject-window timeout                          -> bounded fault-safe result
 ```
-
-For software evidence, record detector decision time and output-image transition time. The acceptable physical/timing limit is frozen later from measured machine evidence rather than invented here.
 
 ### G4 — TLB bench
 
-Measure the signal characteristics needed to make the detector credible:
+Measure:
 
 ```text
 sample/update rate
 TLB filtering profile
 latency and jitter
 dynamic noise / vibration response
-finite-window negative-delta noise envelope
+finite-window/high-water loss noise envelope
 stale/fault/reconnect behavior
 ```
 
+Freeze detector configuration only after this evidence and G8 machine traces agree.
+
 ### G7 — bench review
 
-The view pack and executable tests must agree on the detector, immediate shutdown, disposition latch and two eject paths.
+Canonical views and executable tests must agree on detector semantics, immediate shutdown, disposition latch and the two eject routes.
 
 ### G8 — shadow
 
@@ -226,15 +242,15 @@ broken-bag detection timestamp
 legacy fill-output shutdown timestamp
 SP01 desired DO4..DO8 shutdown timestamp
 reject disposition latch
-210° reject timing
-355° normal timing
+210° reject timing/reference
+355° normal timing/reference
 wrong/duplicate push absence
 ```
 
-Freeze `detection_window`, `loss_trip_kg`, persistence, filters, angular windows and actuator lead from recorded evidence.
+Freeze detector thresholds, filters, angular windows and actuator lead from recorded evidence.
 
 ### G9 — live pilot
 
-A locally authorized live pilot must demonstrate both normal and reject paths, including immediate filling shutdown for a detected broken bag, with rollback and known-good spare available.
+A locally authorized one-spout live pilot must demonstrate both normal and reject paths, including immediate fill shutdown for a detected broken bag, with rollback and a known-good spare available.
 
 This document is the canonical broken-bag process contract until later measured evidence refines its numeric parameters.
