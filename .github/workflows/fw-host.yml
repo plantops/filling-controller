@@ -25,7 +25,7 @@ on:
       - '.github/workflows/fw-host.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   linux-amd64:
@@ -54,11 +54,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build ESP32-S3 firmware with ESP-IDF v5.5.5
+        id: idfbuild
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
+          command: "idf.py build > $GITHUB_WORKSPACE/idf_build.log 2>&1"
+
+      # CI logs are served from blob storage that some environments cannot
+      # reach. On failure, post the compiler errors as a commit comment so the
+      # cause is visible through the API alone.
+      - name: Publish build errors as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          LOG="$GITHUB_WORKSPACE/idf_build.log"
+          [ -f "$LOG" ] || { echo "no build log produced"; exit 0; }
+          ERRS=$(grep -nE "error:|Error |CMake Error|undefined reference|fatal error" "$LOG" | head -40 || true)
+          TAIL=$(tail -n 60 "$LOG")
+          BODY=$(printf 'ESP32-S3 build failed on run %s.\n\n### Errors\n```\n%s\n```\n\n### Log tail\n```\n%s\n```\n' \
+            "$GITHUB_RUN_NUMBER" "$ERRS" "$TAIL")
+          jq -n --arg b "$BODY" '{body:$b}' > /tmp/comment.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -d @/tmp/comment.json | head -c 300
 
       - name: Assemble ESP32 flash bundle
         shell: bash
