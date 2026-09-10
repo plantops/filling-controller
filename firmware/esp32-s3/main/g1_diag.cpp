@@ -1,6 +1,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
+#include "esp_check.h"
 #include "esp_eth.h"
 #include "esp_eth_mac_spi.h"
 #include "esp_eth_netif_glue.h"
