@@ -186,11 +186,53 @@ void reject_pushes_at_210_and_never_uses_normal_path() {
     REQUIRE(s.disposition == BagDisposition::Reject);
     REQUIRE(sp01::all_outputs_off(s.outputs));
 
-    // The completed reject cycle cannot re-enter the normal-discharge path.
+    // A completed reject cycle cannot re-enter the normal-discharge path.
     io.set_input(Di::DischargeRefA, true);
     s = tick(ctl, c, io, w);
     REQUIRE(s.state == State::WaitFillPosition);
     REQUIRE(!sp01::output(s.outputs, Do::BagPush));
+}
+
+void good_path_ignores_210_and_uses_normal_discharge() {
+    auto cfg = reject_config();
+    cfg.settle_min_us = 20000;
+    cfg.discharge_countdown_counts = 0;
+    cfg.discharge_lead_counts = 0;
+    sp01::Controller ctl(cfg);
+    sp01::host::ManualClock c;
+    sp01::host::VirtualIo io;
+    sp01::host::VirtualWeigher w;
+
+    enter_auto_coarse(ctl, c, io, w);
+    publish(w, c, 40.0F);
+    auto s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::FineFill);
+    publish(w, c, 50.0F);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Cutoff);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Settle);
+    publish(w, c, 50.0F, true);
+    s = tick(ctl, c, io, w, {}, cfg.settle_min_us);
+    REQUIRE(s.state == State::WaitDischarge);
+    REQUIRE(s.disposition == BagDisposition::Good);
+
+    PositionSnapshot reject_window;
+    reject_window.reject_window = true;
+    s = tick(ctl, c, io, w, reject_window);
+    REQUIRE(s.state == State::WaitDischarge);
+    REQUIRE(!sp01::output(s.outputs, Do::BagPush));
+
+    io.set_input(Di::DischargeRefA, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::WaitDischarge);
+    io.set_input(Di::DischargeRefA, false);
+    tick(ctl, c, io, w);
+    io.set_input(Di::DischargeRefB, true);
+    s = tick(ctl, c, io, w);
+    REQUIRE(s.state == State::Push);
+    REQUIRE(s.disposition == BagDisposition::Good);
+    REQUIRE(sp01::output(s.outputs, Do::BagPush));
 }
 
 void reject_window_timeout_faults_safe() {
@@ -273,6 +315,7 @@ int main() {
     single_negative_spike_does_not_reject();
     sustained_loss_immediately_stops_fill_and_latches_reject();
     reject_pushes_at_210_and_never_uses_normal_path();
+    good_path_ignores_210_and_uses_normal_discharge();
     reject_window_timeout_faults_safe();
     detector_is_disabled_outside_fill();
     manual_broken_bag_stops_without_automatic_push();
