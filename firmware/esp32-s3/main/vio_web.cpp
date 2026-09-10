@@ -20,10 +20,12 @@
 #ifdef CONFIG_SP01_VIRTUAL_IO
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -49,10 +51,6 @@ const char* const kDiNames[8] = {
     "position.discharge_ref_a", "position.discharge_ref_b",
 };
 
-const char* const kDoNames[8] = {
-    "scanner.down",  "bag_detect_air", "bag.push",      "dosing.valve_a",
-    "dosing.valve_b", "dosing.valve_c", "filling.motor", "aeration",
-};
 
 const char kIndexHtml[] = R"HTML(<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport"
