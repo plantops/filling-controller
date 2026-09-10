@@ -15,13 +15,24 @@ struct VioStatus {
     const char* state{"-"};
     const char* fault{"-"};
     const char* mode{"-"};
+    const char* disposition{"UNDECIDED"};
     float weight_kg{0.0F};
     float target_kg{0.0F};
     std::uint32_t cycle_id{0};
+    bool broken_bag_sim{false};
+    bool reject_window{false};
+    std::uint64_t broken_bag_detected_us{0};
 };
 
-// Pending operator commands, consumed by the controller task.
-enum class VioCommand : std::uint8_t { None, Reset, ClearFault };
+// Pending operator commands, consumed by the virtual controller task.
+enum class VioCommand : std::uint8_t {
+    None,
+    Reset,
+    ClearFault,
+    BrokenBagOn,
+    BrokenBagOff,
+    RejectWindow,
+};
 
 esp_err_t vio_start();
 
