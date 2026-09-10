@@ -6,19 +6,19 @@ The original Yellow-Team 11-view proposal is retained only as design input. Curr
 
 | View | Canonical purpose | Source |
 |---|---|---|
-| V1 | Runtime timeline | `SP01_ENGINEERING_VIEWS.md` |
+| V1 | Runtime timeline | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
 | V2 | State logic matrix | `SP01_ENGINEERING_VIEWS.md` |
 | V3 | Interlock flow | `SP01_ENGINEERING_VIEWS.md` |
 | V4 | Interlock equations; K-map explicitly non-canonical | `SP01_ENGINEERING_VIEWS.md` |
 | V5 | Logic dependency graph | `SP01_ENGINEERING_VIEWS.md` |
 | V6 | Executable C++ engine / ground truth | `SP01_ENGINEERING_VIEWS.md` + controller source |
 | V7 | Physical I/O / terminals | `SP01_ENGINEERING_VIEWS.md` + `BOARD_TERMINALS.md` |
-| V8 | Exception / fault matrix | `SP01_ENGINEERING_VIEWS.md` |
+| V8 | Exception / fault matrix, including 210° broken-bag station | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
 | V9 | Supervisory/ISA-88-style projection | `SP01_ENGINEERING_VIEWS.md` |
 | V10 | Memory/communication/data contracts | `SP01_ENGINEERING_VIEWS.md` + `WEIGHING.md` |
-| V11 | Industrial digital-twin HMI | `SP01_ENGINEERING_VIEWS.md` |
+| V11 | Industrial digital-twin HMI | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
 | V12 | Weighing signal quality, calibration, DSP and bounded tare | `WEIGHING_SIGNAL_QUALITY.md` |
-| V13 | Eight-spout system and rotating/stationary topology | `EIGHT_SPOUT_SYSTEM_TOPOLOGY.md` |
+| V13 | Eight-spout system and rotating/stationary topology | `EIGHT_SPOUT_SYSTEM_TOPOLOGY.md` + `BROKEN_BAG_REJECT.md` |
 
 ## Review decisions frozen from Purple-Team critique
 
@@ -28,9 +28,13 @@ Python asyncio RT      REJECT for production controller; C++/FreeRTOS remains gr
 dW/dt control          NOT CURRENT; future estimator must be filtered, bounded and have static fallback
 Calibration/DSP        ADD as V12
 Unlimited auto-tare    REJECT; any cycle tare must be bounded and separate from calibration
-Bag-rupture detection  ADD as measured candidate protection in V12/V8, not invented thresholds
+Broken-bag protection  DEDICATED 210° field sensor exists; weight trajectory is secondary evidence, not primary detection
 Slip-ring blind spot   ADD system topology V13; do not assume data must traverse slip ring
 ```
+
+## 210° broken-bag station
+
+The installed machine has a dedicated broken-bag reject sensor at approximately 210°. This is now a physical machine fact, but its electrical ownership and reject actuator path are not yet frozen. Current SP01 local 8DI allocation has no spare channel, so no DI may be repurposed without G8 as-built evidence. See `BROKEN_BAG_REJECT.md`.
 
 ## Precedence
 
