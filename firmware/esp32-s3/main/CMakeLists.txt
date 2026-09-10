@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "g2_di_live.cpp"
+    SRCS "g2_do_seq.cpp"
     INCLUDE_DIRS "." "include"
-    REQUIRES driver esp_timer
+    REQUIRES driver
 )
