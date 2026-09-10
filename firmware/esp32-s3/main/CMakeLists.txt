@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "g1_diag.cpp"
     INCLUDE_DIRS "."
-    REQUIRES esp_wifi esp_event esp_system
+    REQUIRES driver esp_timer esp_system esp_hw_support spi_flash
 )
