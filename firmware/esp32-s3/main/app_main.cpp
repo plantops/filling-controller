@@ -3,6 +3,7 @@
 #include "sp01/tlb485.hpp"
 #include "sp01/web_hmi.hpp"
 
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -237,6 +238,16 @@ extern "C" void app_main(void) {
 #if CONFIG_SP01_TLB_ENABLE
     xTaskCreatePinnedToCore(weighing_task, "sp01_tlb", 4096, nullptr, 10, nullptr, 0);
 #endif
+
+    // ESP-IDF's W5500 interrupt mode requires the GPIO ISR service to exist
+    // before the Ethernet driver registers the IRQ handler. The previous G2
+    // build omitted this, so W5500 could fail before DHCP ever started.
+    const esp_err_t gpio_isr_err = gpio_install_isr_service(0);
+    if (gpio_isr_err != ESP_OK && gpio_isr_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(kTag, "GPIO ISR service init failed: %s", esp_err_to_name(gpio_isr_err));
+    } else {
+        ESP_LOGI(kTag, "GPIO ISR service ready for W5500 IRQ");
+    }
 
     sp01::WebHmiConfig web{};
     web.ssid = CONFIG_SP01_WIFI_SSID;
