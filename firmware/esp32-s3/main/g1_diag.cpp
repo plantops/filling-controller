@@ -345,6 +345,7 @@ void poll_eth_link() {
 esp_eth_handle_t g_eth = nullptr;
 esp_netif_t* g_eth_netif = nullptr;
 volatile bool g_got_ip = false;
+volatile bool g_driver_link = false;
 char g_ip_text[16] = "0.0.0.0";
 uint8_t g_eth_mac[6] = {0, 0, 0, 0, 0, 0};
 
@@ -352,9 +353,11 @@ void eth_event_handler(void*, esp_event_base_t, int32_t id, void*) {
     switch (id) {
         case ETHERNET_EVENT_CONNECTED:
             ESP_LOGI(kTag, "ETH EVENT: link connected");
+            g_driver_link = true;
             break;
         case ETHERNET_EVENT_DISCONNECTED:
             ESP_LOGW(kTag, "ETH EVENT: link disconnected");
+            g_driver_link = false;
             g_got_ip = false;
             std::snprintf(g_ip_text, sizeof(g_ip_text), "0.0.0.0");
             break;
@@ -488,6 +491,16 @@ void stage_eth_stack() {
 
 void poll_eth_dhcp() {
     if (g_eth == nullptr) return;
+
+    // Once esp_eth owns the SPI device, the raw PHYCFGR read used by the
+    // eth_link stage is no longer valid. The driver's own link event is the
+    // authoritative source from here on, so stage 5 tracks it.
+    if (g_driver_link) {
+        record(5, Verdict::kPass, "link UP reported by esp_eth driver");
+    } else if (g_stages[5].verdict == Verdict::kPass) {
+        record(5, Verdict::kFail, "link DOWN reported by esp_eth driver");
+    }
+
     if (g_got_ip) {
         record(6, Verdict::kPass, "ip=%s mac=%02x:%02x:%02x:%02x:%02x:%02x",
                g_ip_text, g_eth_mac[0], g_eth_mac[1], g_eth_mac[2], g_eth_mac[3],
