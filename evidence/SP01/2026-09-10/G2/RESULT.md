@@ -1,6 +1,6 @@
 # SP01 G2 physical dummy I/O + Ethernet — 2026-09-10
 
-Status: **ACTIVE — 1 h soak PASS; DI1 and DI3..DI8 PASS; DI2 and physical DO evidence pending**
+Status: **ACTIVE — 1 h soak PASS; DI1..DI8 PASS; physical DO evidence pending**
 
 Branch: `diag/sp01-g2-g9`
 
@@ -52,6 +52,7 @@ Observed evidence supplied from bench:
 
 ```text
 DI1: 0xff -> 0xfe -> 0xff   changed=0x01   CLOSED/OPEN
+DI2: prior stable raw=0xfd -> 0xff   changed=0x02   OPEN
 DI3: 0xff -> 0xfb -> 0xff   changed=0x04   CLOSED/OPEN
 DI4: 0xff -> 0xf7 -> 0xff   changed=0x08   CLOSED/OPEN
 DI5: 0xff -> 0xef -> 0xff   changed=0x10   CLOSED/OPEN
@@ -60,19 +61,28 @@ DI7: 0xff -> 0xbf -> 0xff   changed=0x40   CLOSED/OPEN
 DI8: 0xff -> 0x7f -> 0xff   changed=0x80   CLOSED/OPEN
 ```
 
-The supplied capture shows exactly one expected bit changing for each tested channel and returning to `0xff` when opened. Repeated DI5 and DI7 operations also returned cleanly to the same expected values. No adjacent-bit change is visible in the supplied evidence.
+Explicit DI2 return transition supplied later:
 
-Physical DI verdict from this capture:
+```text
+I (141408) g2di: DI RAW 0xfd -> 0xff  changed=0x02
+I (141408) g2di: DI2 downstream.conveyor_ready    OPEN
+```
+
+The earlier baseline showed all-open `0xff`; the later DI2 record shows the stable previous state was `0xfd` and only bit `0x02` returned high. Together these establish the selected DI2 input reached its closed state and returned to open with no adjacent bit change. The supplied capture shows exactly one expected bit changing for every channel. Repeated DI5 and DI7 operations also returned cleanly to the same expected values.
+
+Physical DI verdict:
 
 ```text
 DI1 PASS
-DI2 PENDING — no DI2 transition present in supplied log
+DI2 PASS
 DI3 PASS
 DI4 PASS
 DI5 PASS
 DI6 PASS
 DI7 PASS
 DI8 PASS
+
+G2-DI PASS
 ```
 
 ## G2 remaining evidence
@@ -80,7 +90,6 @@ DI8 PASS
 G2 does **not** pass yet. Still required with machine actuator wiring disconnected:
 
 ```text
-DI2: OPEN -> CLOSED -> OPEN; expected 0xff -> 0xfd -> 0xff
 DO1..DO8: dummy-load OFF -> ON pulse -> automatic OFF, one-hot, no adjacent output
 reset/restart: physical outputs return to safe state
 ```
@@ -89,5 +98,5 @@ Completed for this bench session:
 
 ```text
 1 h soak / sustained Ethernet  PASS
-DI1, DI3..DI8                  PASS
+DI1..DI8                       PASS
 ```
