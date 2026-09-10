@@ -4,22 +4,30 @@ CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 
-# Use the ESP32-S3 built-in USB Serial/JTAG controller as the PRIMARY console.
-# This lets the same USB-C connection handle flashing and serial monitoring.
+# Native USB Serial/JTAG is the console. Verified working on the physical board
+# 2026-09-10: full boot log captured over this path.
 # CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
-# Actual board module is ESP32-S3-WROOM-1U-N16R8: 16 MB flash / 8 MB PSRAM.
-# Keep the flash tool aligned with the physical N16 module.
+# Module is ESP32-S3-WROOM-1U-N16R8: 16 MB flash.
 # CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# CONFIG_ESPTOOLPY_FLASHFREQ_80M is not set
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
 
-# Built-in W5500 SPI Ethernet. HMI is served on Ethernet via DHCP by default;
-# Wi-Fi remains optional STA when SP01_WIFI_SSID is configured.
+# Custom table adds a coredump partition so a crash before console init still
+# leaves a readable backtrace in flash.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# W5500 SPI Ethernet support, used by the G1 SPI/link stages.
 CONFIG_ETH_USE_SPI_ETHERNET=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
 
-# Current G1/G2 bench build: enable one-hot, auto-off DO pulse test from HMI.
-# MACHINE / SOLENOIDS / CONTACTORS MUST REMAIN DISCONNECTED while this is enabled.
-CONFIG_SP01_BENCH_DO_TEST_ENABLE=y
+# Bench-only virtual I/O with web UI. Physical outputs stay in the safe state.
+# Never enable on a machine-connected node.
+CONFIG_SP01_VIRTUAL_IO=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
