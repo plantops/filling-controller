@@ -34,3 +34,7 @@ add_test(NAME sp01_host_tests COMMAND sp01_host_tests)
 add_executable(sp01_g3_gate_tests tests/gate_g3_test.cpp)
 target_link_libraries(sp01_g3_gate_tests PRIVATE sp01_controller sp01_host_support)
 add_test(NAME sp01_g3_gate_tests COMMAND sp01_g3_gate_tests)
+
+add_executable(sp01_reject_gate_tests tests/gate_reject_test.cpp)
+target_link_libraries(sp01_reject_gate_tests PRIVATE sp01_controller sp01_host_support)
+add_test(NAME sp01_reject_gate_tests COMMAND sp01_reject_gate_tests)
