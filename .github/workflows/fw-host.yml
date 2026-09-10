@@ -6,22 +6,26 @@ on:
     branches: [main, fw-sp01-v0.1, 'diag/**']
     paths:
       - 'firmware/**'
+      - 'tools/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
       - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
+      - 'docs/GATE_EXECUTION_PLAN.md'
       - '.github/workflows/fw-host.yml'
   pull_request:
     paths:
       - 'firmware/**'
+      - 'tools/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
       - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
+      - 'docs/GATE_EXECUTION_PLAN.md'
       - '.github/workflows/fw-host.yml'
 
 permissions:
@@ -32,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Python gate tools
+        run: python -m py_compile tools/*.py
       - name: Configure host simulator
         run: cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
       - name: Build host simulator
@@ -116,6 +122,8 @@ jobs:
           cp docs/BOARD_TERMINALS.md "$DST/BOARD_TERMINALS.md"
           cp docs/assets/BOARD_TERMINALS.svg "$DST/assets/BOARD_TERMINALS.svg"
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
+          cp docs/GATE_EXECUTION_PLAN.md "$DST/GATE_EXECUTION_PLAN.md"
+          cp tools/g1_usb_probe.py tools/analyze_g1_soak.py tools/vbench_gate.py "$DST/"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
           printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
