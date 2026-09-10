@@ -1,58 +1,106 @@
-# SP01 Broken-Bag Reject Path — 210° vs Normal 355°
+# SP01 Broken-Bag Reject Path — Detection + 210° Reject vs Normal 355°
 
-This document records the corrected installed-machine behavior supplied during design review.
+This document records the installed-machine behavior supplied during design review.
 
 ## Confirmed process behavior
 
 ```text
-broken bag detected -> eject/push the affected bag at approximately 210°
-healthy/good bag     -> keep the bag and eject/push normally at approximately 355°
+while filling is active:
+    if measured bag weight is falling because loss exceeds incoming fill
+        -> classify current bag REJECT
+        -> later push/eject this bag at approximately 210°
+
+healthy/good bag
+        -> keep the bag
+        -> push/eject normally at approximately 355°
 ```
 
-**Important correction:** 210° is the **early reject/eject position**, not a dedicated broken-bag sensor position. The previous interpretation of a "210° broken-bag sensor" was wrong and is superseded by this document.
+**Important:** 210° is the **early reject/eject position**, not a broken-bag sensor position.
 
-The mechanism that determines that a bag is broken is a separate concern and still has to be mapped from the installed machine/legacy logic before production firmware authority is assigned.
+The broken-bag detector is derived from the weighing trajectory while filling is active.
 
-## 1. Architectural consequence — one cycle, two disposition paths
+## 1. Detection semantics
 
-The controller must eventually distinguish the disposition of the current bag:
+Let:
+
+```text
+q_in   = cement mass-flow entering the bag
+q_loss = cement mass-flow escaping from a broken bag
+W      = measured bag weight from TLB485
+```
+
+During active filling:
+
+```text
+dW/dt = q_in - q_loss
+```
+
+Therefore the confirmed broken-bag condition described by the installed-machine logic is:
+
+```text
+q_loss > q_in
+    <=> measured net weight decreases while the filling command is active
+    <=> dW/dt < 0 after suitable filtering / persistence checks
+```
+
+This does **not** require an extra broken-bag DI.
+
+Production implementation must not trip from one noisy derivative sample. The preferred deterministic detector is a finite-window weight loss check:
+
+```text
+fill_active = state in {COARSE_FILL, FINE_FILL}
+weight_good = latest WeightSnapshot is fresh and quality==GOOD
+
+delta_w = filtered_weight(now) - filtered_weight(now - detection_window)
+
+if fill_active && weight_good && delta_w < -loss_trip_kg
+   for the required persistence/debounce interval:
+       BROKEN_BAG_DETECTED
+       latch disposition = REJECT for this spout_id + cycle_id
+```
+
+`detection_window`, `loss_trip_kg`, filtering and persistence values are **not frozen yet**. They must come from G4/G8 replay and machine evidence so normal vibration, flow pulsation and TLB filtering do not cause false rejects.
+
+A point-sample derivative is diagnostic only; it is not the preferred production trip mechanism.
+
+## 2. One cycle, two disposition paths
+
+The controller must distinguish the disposition of the current bag:
 
 ```text
 GOOD    -> normal discharge path -> push near 355°
 REJECT  -> early reject path     -> push near 210°
 ```
 
-A rejected bag must not later receive the normal 355° push as though it were a good bag. The reject decision therefore needs to be latched to the affected `spout_id + cycle_id` until that bag is physically ejected or the cycle is otherwise terminated.
+A rejected bag must not later receive the normal 355° push. The REJECT decision is latched to the affected `spout_id + cycle_id` until the bag is ejected or the cycle is otherwise terminated.
 
-This is a routing/timing requirement, not evidence for an additional physical output channel.
-
-## 2. Detection is separate from the 210° position
-
-Do not infer a sensor at 210°.
-
-The following remain to be established from as-built evidence:
+Required invariants:
 
 ```text
-what signal or logic classifies the current bag as broken
-when in the cycle that classification can occur
-whether detection is local to the spout or machine-level
-how the affected spout/cycle is identified
-what electrical interface carries the broken-bag indication
-what action the legacy controller takes immediately at detection before 210°
+GOOD -> never push at 210°
+REJECT -> push at 210° and suppress later 355° push
+one cycle has one final disposition
+network/HMI never owns the detection or eject timing
 ```
 
-Possible weight/bag-present diagnostics may be useful later, but they are not automatically the primary detector and must not be promoted to production authority without measured evidence.
+## 3. Immediate action at detection
 
-## 3. Position references are also separate
+The confirmed information in this review defines how the bag is **detected** and where it is later **rejected**.
 
-The firmware needs a trustworthy way to know when the affected spout reaches the two physical eject windows:
+The exact immediate legacy output response at the instant of detection is still to be verified in G8. In particular, the project must trace whether legacy logic immediately removes dosing/motor/aeration commands or performs another bounded sequence before reaching the 210° reject window.
+
+Until that is measured, do not invent additional output channels or timing constants.
+
+## 4. Position references
+
+The firmware needs a trustworthy way to know when the affected spout reaches:
 
 ```text
 reject eject window ~210°
 normal eject window ~355°
 ```
 
-The current controller already has discharge references A/B used for the normal discharge timing path. Those references must not be assumed to provide a valid 210° reference in the same revolution until the actual mechanical geometry is mapped.
+The current controller already has discharge references A/B used for the normal discharge timing path. Those references must not be assumed to provide the 210° window until the actual machine geometry is mapped.
 
 For the 210° path, field commissioning must determine whether timing is derived from:
 
@@ -66,7 +114,7 @@ or another verified source
 
 No new DI is allocated merely from this requirement.
 
-## 4. Output authority
+## 5. Output authority
 
 Current SP01 output semantics include:
 
@@ -74,98 +122,107 @@ Current SP01 output semantics include:
 DO3 = bag.push
 ```
 
-The corrected process description says both reject and normal disposition are performed by a **push/eject action at different rotor angles**. Therefore this requirement does not by itself justify inventing an `OUT_REJECT` output.
-
-Canonical intent:
+Both reject and normal disposition use the same semantic push/eject action at different rotor positions:
 
 ```text
-same semantic action: bag.push
-routing difference:   210° reject window vs 355° normal window
+DO3 @ ~210° only when disposition == REJECT
+DO3 @ ~355° only when disposition == GOOD
 ```
+
+This requirement does not create a new `OUT_REJECT` output.
 
 The as-built actuator/electrical path still has to be verified before production output authority is enabled.
 
-## 5. Current executable gap
+## 6. Current executable gap
 
-The current `sp01::Controller` implements one normal discharge path:
+The current `sp01::Controller` implements the healthy-bag path:
 
 ```text
 SETTLE -> WAIT_DISCHARGE -> PUSH -> COMPLETE
 ```
 
-It does **not yet** implement a separately latched broken-bag disposition with an early 210° push. Therefore G3 remains software-active until this behavior is represented and tested; existing normal-cycle tests cannot be treated as complete coverage of the installed machine behavior.
-
-Do not add an implementation until the broken-bag detection contract and the 210° position-reference contract are frozen enough to test deterministically.
-
-## 6. Conceptual state/routing model
-
-This is a design requirement, not yet executable state names:
+It does not yet implement:
 
 ```text
-                         +-> GOOD   -> wait normal eject window ~355° -> bag.push
-filled/current bag ------|
-                         +-> REJECT -> wait reject eject window ~210° -> bag.push
+filtered negative-weight detection while filling
+per-cycle GOOD/REJECT disposition latch
+210° early reject scheduling
+suppression of the later 355° push after reject
 ```
 
-Required invariants once implemented:
-
-```text
-one bag has one disposition per cycle
-REJECT is latched to the affected cycle
-REJECT suppresses the later normal 355° push for that cycle
-GOOD does not trigger the 210° reject push
-reset/fault leaves physical outputs in the safe image
-network/HMI is not the timing authority
-```
+Therefore G3 remains software-active until these behaviors are represented and tested deterministically.
 
 ## 7. Timeline / digital-twin requirement
 
-V1 and V11 should distinguish classification from ejection position:
+V1 and V11 should record:
 
 ```text
 cycle_id
 spout_id
-broken_bag_detected / reject_latched
-detection timestamp and source
-weight + bag-present context
+fill_active
+raw/filtered weight
+weight delta over detection window
+broken_bag_detected
+reject_latched
+detection timestamp
 reject_due / reject_push_on / reject_push_off around 210°
 normal_discharge_due / normal_push_on / normal_push_off around 355°
 final disposition = REJECTED | NORMAL
 ```
 
-This makes it possible to compare the new controller with the legacy machine without pretending that the 210° position itself detects the broken bag.
+This allows the detector threshold/filter to be tuned from real traces rather than guessed.
 
-## 8. G8 survey checklist
+## 8. G3/G4/G8 test requirements
 
-Before production integration, capture:
+### G3 software
+
+Use deterministic synthetic/replay traces:
 
 ```text
-broken-bag detection source and electrical path
-signal polarity / pulse or level semantics
-which controller/logic currently owns the detection
-how detection is associated with spout_id and cycle_id
-actual rotor reference used to schedule 210°
-actual rotor reference used to schedule ~355° normal push
-measured angular/timing windows and actuator lead
-whether the same physical pusher/solenoid is used for both actions
-legacy behavior immediately after broken-bag detection
-legacy behavior at 210° reject
-legacy behavior for a healthy bag at ~355°
-behavior if detection arrives too late for the 210° window
-behavior if the position reference is missing/invalid
+normal increasing weight -> GOOD
+noisy but increasing weight -> GOOD
+single negative spike -> must not reject
+sustained negative finite-window delta while filling -> REJECT
+negative delta outside filling states -> no broken-bag decision
+REJECT latched -> 210° push only, no later 355° push
+GOOD -> no 210° push, normal 355° push
 ```
 
-Angles are approximate machine references until field measurements freeze the actual timing/lead values.
+### G4 weighing bench
+
+Measure enough signal behavior to bound:
+
+```text
+sample/update rate
+TLB filtering
+zero and dynamic noise
+latency/jitter
+finite-window weight-delta noise
+```
+
+### G8 shadow
+
+Capture real machine cycles including, where plant procedure permits, broken-bag/reject examples. Freeze:
+
+```text
+detection_window
+loss_trip_kg
+persistence/debounce
+210° timing reference and actuator lead
+355° timing reference and actuator lead
+legacy immediate response at broken-bag detection
+```
+
+Angles remain approximate until measured commissioning values are frozen.
 
 ## 9. Gate impact
 
 ```text
-G3   add deterministic GOOD-vs-REJECT routing tests once detection/position contracts are defined
-     REJECT path must push at the simulated 210° window and suppress normal ~355° push
-     GOOD path must skip 210° and push only at the normal ~355° window
-G7   design review must include the two-disposition model
-G8   mandatory shadow comparison of broken-bag reject at 210° and healthy-bag normal push at ~355°
-G9   live pilot must validate both paths under local commissioning procedure before full acceptance
+G3   implement/test deterministic weight-loss detector and GOOD/REJECT routing
+G4   characterize TLB dynamic signal/noise needed for detector thresholds
+G7   review detector, disposition latch and two eject paths
+G8   shadow-compare broken-bag detection + 210° reject and healthy ~355° discharge
+G9   live pilot validates both paths under local commissioning procedure
 ```
 
-This document is the canonical description of the broken-bag disposition behavior until more precise as-built evidence is frozen.
+This document is the canonical description of broken-bag detection and disposition until more precise as-built evidence is frozen.
