@@ -60,7 +60,6 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
-          command: "idf.py build > $GITHUB_WORKSPACE/idf_build.log 2>&1"
 
       # CI logs are served from blob storage that some environments cannot
       # reach. On failure, post the compiler errors as a commit comment so the
