@@ -5,8 +5,8 @@
 //
 // Sequence after boot:
 //   - all outputs OFF for 10 s (safe-start observation window)
-//   - DO1 ON 1 s, all OFF 2 s
-//   - DO2 ON 1 s, all OFF 2 s
+//   - DO1 ON 500 ms, all OFF 2 s
+//   - DO2 ON 500 ms, all OFF 2 s
 //   - ... DO8
 //   - repeat forever
 //
@@ -31,7 +31,7 @@ constexpr std::uint8_t kTcaRegOutput = 0x01;
 constexpr std::uint8_t kTcaRegConfig = 0x03;
 
 constexpr TickType_t kBootSafeMs = pdMS_TO_TICKS(10000);
-constexpr TickType_t kOnMs = pdMS_TO_TICKS(1000);
+constexpr TickType_t kOnMs = pdMS_TO_TICKS(500);
 constexpr TickType_t kOffGapMs = pdMS_TO_TICKS(2000);
 
 const char* const kDoNames[8] = {
@@ -98,7 +98,7 @@ extern "C" void app_main(void) {
     ESP_LOGI(kTag, "SP01 G2 DO SEQUENTIAL TEST");
     ESP_LOGI(kTag, "MACHINE ACTUATORS MUST BE DISCONNECTED");
     ESP_LOGI(kTag, "sequence: 10 s ALL OFF, then DO1..DO8 one-hot");
-    ESP_LOGI(kTag, "pulse: 1 s ON, 2 s ALL OFF; sequence repeats");
+    ESP_LOGI(kTag, "pulse: 500 ms ON, 2 s ALL OFF; sequence repeats");
     ESP_LOGI(kTag, "================================================");
 
     init_outputs_safe();
