@@ -2,89 +2,68 @@
 
 Canonical engineering views for design review, commissioning, HMI and long-term maintenance.
 
-The original Yellow-Team material is retained only as design input. Current installed-machine evidence, executable firmware and frozen interface contracts take precedence.
+Primary canonical pack: [`SP01_CANONICAL_VIEWS.md`](SP01_CANONICAL_VIEWS.md).
 
-| View | Canonical purpose | Source |
+Historical Yellow/Purple/Red-team material and the earlier `SP01_ENGINEERING_VIEWS.md` remain design/review context only. Installed-machine evidence, executable firmware and frozen interface contracts take precedence.
+
+| View | Canonical purpose | Primary source |
 |---|---|---|
-| V1 | Runtime timeline and event evidence | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V2 | State logic matrix | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V3 | Interlock/process flow | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V4 | Interlock equations; K-map non-canonical | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V5 | Logic dependency graph | `SP01_ENGINEERING_VIEWS.md` |
-| V6 | Executable C++ engine / ground truth | controller source + `SP01_ENGINEERING_VIEWS.md` |
-| V7 | Physical I/O / terminals | `BOARD_TERMINALS.md` + `SP01_ENGINEERING_VIEWS.md` |
-| V8 | Exception / fault / controlled-reject matrix | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V9 | Supervisory/ISA-88-style projection | `SP01_ENGINEERING_VIEWS.md` |
-| V10 | Memory/communication/data contracts | `WEIGHING.md` + `SP01_ENGINEERING_VIEWS.md` |
-| V11 | Industrial digital-twin HMI | `SP01_ENGINEERING_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
-| V12 | Weighing signal quality, calibration, DSP and bounded tare | `WEIGHING_SIGNAL_QUALITY.md` + `BROKEN_BAG_REJECT.md` |
-| V13 | Eight-spout rotating/stationary topology | `EIGHT_SPOUT_SYSTEM_TOPOLOGY.md` + `BROKEN_BAG_REJECT.md` |
+| V1 | Runtime timeline and event evidence | `SP01_CANONICAL_VIEWS.md` |
+| V2 | State/process matrix | `SP01_CANONICAL_VIEWS.md` |
+| V3 | Interlock/process routing flow | `SP01_CANONICAL_VIEWS.md` |
+| V4 | Interlock predicates; K-map non-canonical | `SP01_CANONICAL_VIEWS.md` |
+| V5 | Logic dependency / authority graph | `SP01_CANONICAL_VIEWS.md` |
+| V6 | Executable C++ engine / ground truth | controller source + `SP01_CANONICAL_VIEWS.md` |
+| V7 | Physical I/O / terminals | `BOARD_TERMINALS.md` + `SP01_CANONICAL_VIEWS.md` |
+| V8 | Exception / fault / controlled-reject matrix | `SP01_CANONICAL_VIEWS.md` + `BROKEN_BAG_REJECT.md` |
+| V9 | Supervisory process projection | `SP01_CANONICAL_VIEWS.md` |
+| V10 | Communication / telemetry contracts | `WEIGHING.md` + `SP01_CANONICAL_VIEWS.md` |
+| V11 | Industrial digital-twin / web HMI | `SP01_CANONICAL_VIEWS.md` |
+| V12 | Weighing quality, calibration, filtering and tare | `WEIGHING_SIGNAL_QUALITY.md` + `SP01_CANONICAL_VIEWS.md` |
+| V13 | Eight-spout rotating/stationary topology | `EIGHT_SPOUT_SYSTEM_TOPOLOGY.md` + `SP01_CANONICAL_VIEWS.md` |
 
-## Frozen process facts relevant to the views
+## Frozen process facts
 
 ```text
-Production controller      ESP32-S3 / ESP-IDF / C++ / FreeRTOS
-Weight source              LAUMAS TLB485 over isolated RS485
-Broken-bag detection       weight falls while filling because loss > incoming fill
-Detection implementation   bounded filtered finite-window delta; thresholds from G4/G8 evidence
-On broken-bag decision     latch REJECT and immediately remove DO4..DO8
-Reject eject               one bag.push near ~210°
-Normal healthy eject       one bag.push near ~355°
-Rejected cycle             must not later push at ~355°
-210°                       reject/eject position, not a broken-bag sensor
+controller               ESP32-S3 / ESP-IDF / C++17 / FreeRTOS
+one node                 one independent spout
+weight                   LAUMAS TLB485 -> isolated RS485 -> WeightSnapshot
+broken-bag detection     qualified net-weight decrease while COARSE/FINE filling is active
+on detection             latch REJECT + remove DO4..DO8 in the same control decision
+reject eject             DO3 bag.push near ~210 deg
+healthy eject            DO3 bag.push near ~355 deg
+rejected cycle           never gets the later ~355 deg push
+210 deg                  reject/eject position, not a broken-bag sensor
+cloud/central HMI        supervisory only; never owns local cutoff/interlock/eject timing
 ```
 
-The immediate reject shutdown currently means:
+The executable branch now contains the software representation of this routing: `BagDisposition`, `State::RejectWait`, a bounded weight-loss detector and the semantic `PositionSnapshot.reject_window`. Production detector thresholds and the real 210-degree timing source remain disabled/unfrozen until G4/G8 evidence supplies them.
+
+## Gate ownership by views
 
 ```text
-DO4 dosing.valve_a OFF
-DO5 dosing.valve_b OFF
-DO6 dosing.valve_c OFF
-DO7 filling.motor  OFF
-DO8 spout.aeration OFF
-```
-
-Do not infer additional `scanner.down` or `bag_detect_air` behavior without machine evidence.
-
-## How the standard views must represent broken-bag handling
-
-```text
-V1  show weight loss -> reject decision -> immediate fill shutdown -> push@210 -> suppress@355
-V2  show a controlled REJECT branch from COARSE_FILL/FINE_FILL
-V3  show detector -> latch -> fill OFF -> wait 210 -> push -> complete/reject outcome
-V4  keep detector as a bounded predicate; no K-map
-V8  distinguish controlled REJECT from controller/weight/I-O faults
-V11 show detector evidence, disposition, desired/physical DO and selected eject window
-V12 own filtering/window/noise/threshold evidence
-V13 keep reject disposition bound to the correct spout_id + cycle_id while rotating
-```
-
-## Review decisions retained from Purple-Team critique
-
-```text
-K-map                  REMOVE as canonical logic view
-Python asyncio RT      REJECT for production control
-raw HX711 path         REJECT for production; TLB485 remains weighing boundary
-dW/dt point trip       REJECT; use bounded filtered finite-window detection
-Calibration/DSP        V12
-Unlimited auto-tare    REJECT; any cycle tare must be bounded and separate from calibration
-Broken-bag behavior    DETECT from weight loss during fill; immediately stop filling; reject at ~210°
-Slip-ring/system view  V13; do not invent a data path before as-built evidence
+G0   V6
+G1   V7 + V10
+G2   V1 + V7
+G2T  V1 + V7 + V10
+G3   V2 + V3 + V4 + V6 + V8
+G4   V1 + V10 + V12
+G5   V10 + V12
+G6   V5 + V10 + V11
+G7   all 13 views reconciled
+G8   V1 + V7 + V8 + V11 + V12 + V13 shadow
+G9   V1 + V8 + V11 controlled live pilot
 ```
 
 ## Precedence
-
-When views disagree:
 
 ```text
 1. measured installed-machine electrical/mechanical/process evidence
 2. executable C++ controller + board adapter
 3. frozen I/O / weighing / reject / topology contracts
-4. generated state/fault/timeline views
-5. supervisory/HMI projections
+4. SP01_CANONICAL_VIEWS.md
+5. generated HMI/diagram projections
 6. historical team proposals
 ```
-
-A known installed-machine behavior may therefore expose a software gap. In that case the view records the required behavior and G3 stays open until V6 catches up.
 
 Numeric detector thresholds, angular windows and actuator-lead values are frozen only from gate evidence.
