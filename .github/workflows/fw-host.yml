@@ -96,7 +96,17 @@ jobs:
           cp "$SRC/partition_table/partition-table.bin" "$DST/partition_table/"
           find "$SRC" -maxdepth 1 -type f -name '*.bin' -exec cp {} "$DST/" \;
 
-          if [ -f "$SRC/flash_args" ]; then cp "$SRC/flash_args" "$DST/"; fi
+          if [ -f "$SRC/flash_args" ]; then
+            cp "$SRC/flash_args" "$DST/flash_args_legacy"
+            # IDF emits the pre-5.x option spelling. esptool 5 warns about it
+            # and later versions may drop it, so ship a hyphenated default.
+            sed -e 's/--flash_mode/--flash-mode/g' \
+                -e 's/--flash_freq/--flash-freq/g' \
+                -e 's/--flash_size/--flash-size/g' \
+                "$SRC/flash_args" > "$DST/flash_args"
+          fi
+          cp tools/flash.ps1 tools/flash.sh "$DST/"
+          chmod +x "$DST/flash.sh"
           if [ -f "$SRC/flasher_args.json" ]; then cp "$SRC/flasher_args.json" "$DST/"; fi
           if [ -f "$SRC/project_description.json" ]; then cp "$SRC/project_description.json" "$DST/"; fi
 
