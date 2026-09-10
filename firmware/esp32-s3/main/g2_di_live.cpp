@@ -4,9 +4,9 @@
 // dry-contact jumper. Physical outputs are forced to the safe latch and are
 // never commanded ON by this build.
 //
-// Bench wiring for this gate:
-//   INPUT COM ---- dry jumper/switch ---- DI1..DI8, one at a time
-//   INPUT GND ---- unused for this dry-contact test
+// Bench wiring for this gate (Waveshare passive/dry-contact topology):
+//   INPUT DGND ---- dry jumper/switch ---- DI1..DI8, one at a time
+//   INPUT COM  ---- leave floating for this dry-contact test
 //   machine actuator wiring disconnected
 
 #include <cstdint>
@@ -114,7 +114,7 @@ void print_change(std::uint8_t before, std::uint8_t now) {
     for (int i = 0; i < 8; ++i) {
         const std::uint8_t mask = static_cast<std::uint8_t>(1U << i);
         if ((changed & mask) == 0) continue;
-        // Unwired/open is pulled high. Closing INPUT COM -> DIx makes the
+        // Unwired/open is pulled high. Closing INPUT DGND -> DIx makes the
         // corresponding raw GPIO bit low on this board input stage.
         const bool closed = (now & mask) == 0;
         ESP_LOGI(kTag, "DI%d %-28s %s", i + 1, kDiNames[i], closed ? "CLOSED" : "OPEN");
@@ -127,7 +127,8 @@ extern "C" void app_main(void) {
     ESP_LOGI(kTag, "================================================");
     ESP_LOGI(kTag, "SP01 G2 DI LIVE TEST");
     ESP_LOGI(kTag, "machine/actuator wiring disconnected");
-    ESP_LOGI(kTag, "wire only: INPUT COM <-> one DIx at a time");
+    ESP_LOGI(kTag, "dry contact: INPUT DGND <-> one DIx at a time");
+    ESP_LOGI(kTag, "leave INPUT COM floating for this test");
     ESP_LOGI(kTag, "expected all open: raw=0xFF");
     ESP_LOGI(kTag, "================================================");
 
