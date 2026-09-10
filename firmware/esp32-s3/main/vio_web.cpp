@@ -36,12 +36,15 @@ namespace {
 constexpr char kTag[] = "vio";
 
 httpd_handle_t g_server = nullptr;
-volatile uint8_t g_vdi = 0x00;  // bit0 = DI1, set by the browser
+uint8_t g_vdi = 0x00;  // bit0 = DI1, set by the browser
 char g_ip_text[16] = "0.0.0.0";
 
-// Published by the controller task; read by the HTTP handlers.
+// HTTP handlers and the controller task run independently and may execute on
+// different cores. Protect the compound virtual-I/O image explicitly; volatile
+// alone would not make read-modify-write or VioStatus copies atomic.
+portMUX_TYPE g_vio_mux = portMUX_INITIALIZER_UNLOCKED;
 VioStatus g_status{};
-volatile VioCommand g_command = VioCommand::None;
+VioCommand g_command = VioCommand::None;
 
 // Semantic names from docs/BOARD_TERMINALS.md.
 const char* const kDiNames[8] = {
@@ -171,6 +174,15 @@ esp_err_t index_handler(httpd_req_t* req) {
 }
 
 esp_err_t io_handler(httpd_req_t* req) {
+    uint8_t vdi = 0;
+    VioStatus status{};
+    char ip[sizeof(g_ip_text)]{};
+    portENTER_CRITICAL(&g_vio_mux);
+    vdi = g_vdi;
+    status = g_status;
+    std::memcpy(ip, g_ip_text, sizeof(ip));
+    portEXIT_CRITICAL(&g_vio_mux);
+
     char body[352];
     const int n = std::snprintf(
         body, sizeof(body),
@@ -178,14 +190,14 @@ esp_err_t io_handler(httpd_req_t* req) {
         "\"up\":%llu,\"heap\":%lu,\"link\":%s,\"state\":\"%s\","
         "\"fault\":\"%s\",\"opmode\":\"%s\",\"weight\":%.3f,"
         "\"target\":%.2f,\"cycle\":%lu}",
-        static_cast<unsigned>(g_vdi), static_cast<unsigned>(g_status.do_bits),
-        g_ip_text,
+        static_cast<unsigned>(vdi), static_cast<unsigned>(status.do_bits),
+        ip,
         static_cast<unsigned long long>(esp_timer_get_time() / 1000),
         static_cast<unsigned long>(esp_get_free_heap_size()),
-        vio_link_up() ? "true" : "false", g_status.state, g_status.fault,
-        g_status.mode, static_cast<double>(g_status.weight_kg),
-        static_cast<double>(g_status.target_kg),
-        static_cast<unsigned long>(g_status.cycle_id));
+        vio_link_up() ? "true" : "false", status.state, status.fault,
+        status.mode, static_cast<double>(status.weight_kg),
+        static_cast<double>(status.target_kg),
+        static_cast<unsigned long>(status.cycle_id));
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n);
 }
@@ -209,7 +221,10 @@ esp_err_t di_handler(httpd_req_t* req) {
         return ESP_FAIL;
     }
     const uint8_t mask = static_cast<uint8_t>(1u << ch);
-    g_vdi = val ? (g_vdi | mask) : (g_vdi & static_cast<uint8_t>(~mask));
+    portENTER_CRITICAL(&g_vio_mux);
+    g_vdi = val ? static_cast<uint8_t>(g_vdi | mask)
+                : static_cast<uint8_t>(g_vdi & static_cast<uint8_t>(~mask));
+    portEXIT_CRITICAL(&g_vio_mux);
     ESP_LOGI(kTag, "virtual DI%d %-26s -> %s", ch + 1, kDiNames[ch],
              val ? "CLOSED" : "OPEN");
     return httpd_resp_sendstr(req, "ok");
@@ -223,14 +238,18 @@ esp_err_t cmd_handler(httpd_req_t* req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "a=reset|clear");
         return ESP_FAIL;
     }
+    VioCommand next = VioCommand::None;
     if (std::strcmp(action, "reset") == 0) {
-        g_command = VioCommand::Reset;
+        next = VioCommand::Reset;
     } else if (std::strcmp(action, "clear") == 0) {
-        g_command = VioCommand::ClearFault;
+        next = VioCommand::ClearFault;
     } else {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "a=reset|clear");
         return ESP_FAIL;
     }
+    portENTER_CRITICAL(&g_vio_mux);
+    g_command = next;
+    portEXIT_CRITICAL(&g_vio_mux);
     ESP_LOGI(kTag, "operator command: %s", action);
     return httpd_resp_sendstr(req, "ok");
 }
@@ -238,16 +257,29 @@ esp_err_t cmd_handler(httpd_req_t* req) {
 }  // namespace
 
 void vio_set_ip(const char* ip) {
+    portENTER_CRITICAL(&g_vio_mux);
     std::snprintf(g_ip_text, sizeof(g_ip_text), "%s", ip);
+    portEXIT_CRITICAL(&g_vio_mux);
 }
 
-uint8_t vio_di() { return g_vdi; }
+uint8_t vio_di() {
+    portENTER_CRITICAL(&g_vio_mux);
+    const uint8_t copy = g_vdi;
+    portEXIT_CRITICAL(&g_vio_mux);
+    return copy;
+}
 
-void vio_publish(const VioStatus& status) { g_status = status; }
+void vio_publish(const VioStatus& status) {
+    portENTER_CRITICAL(&g_vio_mux);
+    g_status = status;
+    portEXIT_CRITICAL(&g_vio_mux);
+}
 
 VioCommand vio_take_command() {
+    portENTER_CRITICAL(&g_vio_mux);
     const VioCommand c = g_command;
     g_command = VioCommand::None;
+    portEXIT_CRITICAL(&g_vio_mux);
     return c;
 }
 
@@ -272,9 +304,13 @@ esp_err_t vio_start() {
         if (err != ESP_OK) return err;
     }
 
+    char ip[sizeof(g_ip_text)]{};
+    portENTER_CRITICAL(&g_vio_mux);
+    std::memcpy(ip, g_ip_text, sizeof(ip));
+    portEXIT_CRITICAL(&g_vio_mux);
     ESP_LOGW(kTag, "VIRTUAL I/O ACTIVE - no physical inputs read,");
     ESP_LOGW(kTag, "no physical outputs driven, TCA9554 held safe.");
-    ESP_LOGI(kTag, "web UI on http://%s/", g_ip_text);
+    ESP_LOGI(kTag, "web UI on http://%s/", ip);
     return ESP_OK;
 }
 
