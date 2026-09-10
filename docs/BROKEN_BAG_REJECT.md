@@ -1,132 +1,171 @@
-# SP01 Broken-Bag Reject Station — 210°
+# SP01 Broken-Bag Reject Path — 210° vs Normal 355°
 
-This document records a confirmed installed-machine fact supplied during design review:
+This document records the corrected installed-machine behavior supplied during design review.
 
-```text
-A dedicated broken-bag reject sensor exists at approximately 210° mechanical position.
-```
-
-This is now part of the physical machine model. The exact electrical implementation, signal polarity, terminal/cabinet location, pulse timing, and reject actuator path are still to be surveyed on the installed packer before firmware authority is assigned.
-
-## 1. Architectural consequence
-
-Broken-bag handling must not be designed as a purely inferred `dW/dt` feature. The machine already provides a dedicated physical detection/reject reference at the 210° station.
-
-Therefore the future protection hierarchy is:
+## Confirmed process behavior
 
 ```text
-primary field evidence      = dedicated 210° broken-bag reject sensor
-secondary corroboration     = bag-present status / weight trajectory / cycle context
-controller or machine action = only after the legacy wiring and actuator path are mapped
+broken bag detected -> eject/push the affected bag at approximately 210°
+healthy/good bag     -> keep the bag and eject/push normally at approximately 355°
 ```
 
-A weight-drop or low-flow estimator may later be useful as diagnostics or redundancy, but it must not replace the installed sensor without measured evidence and a separate design decision.
+**Important correction:** 210° is the **early reject/eject position**, not a dedicated broken-bag sensor position. The previous interpretation of a "210° broken-bag sensor" was wrong and is superseded by this document.
 
-## 2. Do not invent an I/O channel
+The mechanism that determines that a bag is broken is a separate concern and still has to be mapped from the installed machine/legacy logic before production firmware authority is assigned.
 
-Current SP01 v0.1 already allocates all eight local DIs:
+## 1. Architectural consequence — one cycle, two disposition paths
+
+The controller must eventually distinguish the disposition of the current bag:
 
 ```text
-DI1 hopper.feeder_running
-DI2 downstream.conveyor_ready
-DI3 machine.motor_running
-DI4 process.initiative
-DI5 cycle.fill_position
-DI6 bag.present
-DI7 position.discharge_ref_a
-DI8 position.discharge_ref_b
+GOOD    -> normal discharge path -> push near 355°
+REJECT  -> early reject path     -> push near 210°
 ```
 
-No local DI is currently free for the 210° sensor.
+A rejected bag must not later receive the normal 355° push as though it were a good bag. The reject decision therefore needs to be latched to the affected `spout_id + cycle_id` until that bag is physically ejected or the cycle is otherwise terminated.
 
-Do **not** silently repurpose DI7/DI8 or another input. First determine whether the 210° signal is:
+This is a routing/timing requirement, not evidence for an additional physical output channel.
+
+## 2. Detection is separate from the 210° position
+
+Do not infer a sensor at 210°.
+
+The following remain to be established from as-built evidence:
 
 ```text
-- a per-spout signal carried on the rotating assembly;
-- a fixed machine/stationary signal shared by all eight spouts;
-- part of an existing legacy reject controller;
-- available through another fieldbus/discrete interface;
-- or already encoded through wiring not yet documented.
+what signal or logic classifies the current bag as broken
+when in the cycle that classification can occur
+whether detection is local to the spout or machine-level
+how the affected spout/cycle is identified
+what electrical interface carries the broken-bag indication
+what action the legacy controller takes immediately at detection before 210°
 ```
 
-This is an explicit architecture gap to close in G8 shadow commissioning.
+Possible weight/bag-present diagnostics may be useful later, but they are not automatically the primary detector and must not be promoted to production authority without measured evidence.
 
-## 3. Detection versus rejection authority
+## 3. Position references are also separate
 
-Keep these concepts separate:
+The firmware needs a trustworthy way to know when the affected spout reaches the two physical eject windows:
 
 ```text
-BROKEN_BAG_SENSOR_210     physical observation
-BROKEN_BAG_DETECTED       interpreted event
-REJECT_REQUIRED           process decision
-REJECT_ACTUATOR_COMMAND   physical authority
+reject eject window ~210°
+normal eject window ~355°
 ```
 
-The presence of the sensor does not by itself prove which actuator performs rejection or which controller owns it.
+The current controller already has discharge references A/B used for the normal discharge timing path. Those references must not be assumed to provide a valid 210° reference in the same revolution until the actual mechanical geometry is mapped.
 
-Current 8DO SP01 allocation contains no dedicated reject output. Do not create an `OUT_REJECT` alias on an existing output until the as-built legacy mechanism is traced.
+For the 210° path, field commissioning must determine whether timing is derived from:
 
-## 4. Timeline / digital-twin requirement
+```text
+an existing angular/reference signal
+previous/current revolution timing
+another legacy position signal
+a machine-level position encoder/cam
+or another verified source
+```
 
-V1 and V11 should eventually show the 210° station explicitly once its reference is field-verified:
+No new DI is allocated merely from this requirement.
+
+## 4. Output authority
+
+Current SP01 output semantics include:
+
+```text
+DO3 = bag.push
+```
+
+The corrected process description says both reject and normal disposition are performed by a **push/eject action at different rotor angles**. Therefore this requirement does not by itself justify inventing an `OUT_REJECT` output.
+
+Canonical intent:
+
+```text
+same semantic action: bag.push
+routing difference:   210° reject window vs 355° normal window
+```
+
+The as-built actuator/electrical path still has to be verified before production output authority is enabled.
+
+## 5. Current executable gap
+
+The current `sp01::Controller` implements one normal discharge path:
+
+```text
+SETTLE -> WAIT_DISCHARGE -> PUSH -> COMPLETE
+```
+
+It does **not yet** implement a separately latched broken-bag disposition with an early 210° push. Therefore G3 remains software-active until this behavior is represented and tested; existing normal-cycle tests cannot be treated as complete coverage of the installed machine behavior.
+
+Do not add an implementation until the broken-bag detection contract and the 210° position-reference contract are frozen enough to test deterministically.
+
+## 6. Conceptual state/routing model
+
+This is a design requirement, not yet executable state names:
+
+```text
+                         +-> GOOD   -> wait normal eject window ~355° -> bag.push
+filled/current bag ------|
+                         +-> REJECT -> wait reject eject window ~210° -> bag.push
+```
+
+Required invariants once implemented:
+
+```text
+one bag has one disposition per cycle
+REJECT is latched to the affected cycle
+REJECT suppresses the later normal 355° push for that cycle
+GOOD does not trigger the 210° reject push
+reset/fault leaves physical outputs in the safe image
+network/HMI is not the timing authority
+```
+
+## 7. Timeline / digital-twin requirement
+
+V1 and V11 should distinguish classification from ejection position:
 
 ```text
 cycle_id
 spout_id
-210° sensor edge / level
-bag-present state
-weight at event
-controller state
-legacy reject action
-SP01 desired action (shadow only during G8)
+broken_bag_detected / reject_latched
+detection timestamp and source
+weight + bag-present context
+reject_due / reject_push_on / reject_push_off around 210°
+normal_discharge_due / normal_push_on / normal_push_off around 355°
+final disposition = REJECTED | NORMAL
 ```
 
-The central eight-spout view must correlate the fixed 210° station with the spout currently passing it. A raw sensor pulse without `spout_id/cycle_id` correlation is insufficient evidence for per-spout fault history.
+This makes it possible to compare the new controller with the legacy machine without pretending that the 210° position itself detects the broken bag.
 
-## 5. G8 survey checklist
+## 8. G8 survey checklist
 
-Before integrating this signal into executable logic, capture:
+Before production integration, capture:
 
 ```text
-exact mechanical reference used for 210°
-sensor manufacturer/model if available
-sensor type and supply voltage
-NO/NC or active-high/active-low behavior
-pulse width / dwell time at operating speed
-physical terminal and cabinet reference
-whether the sensor rotates or is stationary
-how the legacy controller identifies the affected spout
-legacy response when the sensor trips
-actual reject actuator and its electrical command path
-behavior when sensor is stuck ON / stuck OFF / disconnected
-behavior for an intact bag passing 210°
-behavior for an intentionally simulated reject condition where plant procedure permits
+broken-bag detection source and electrical path
+signal polarity / pulse or level semantics
+which controller/logic currently owns the detection
+how detection is associated with spout_id and cycle_id
+actual rotor reference used to schedule 210°
+actual rotor reference used to schedule ~355° normal push
+measured angular/timing windows and actuator lead
+whether the same physical pusher/solenoid is used for both actions
+legacy behavior immediately after broken-bag detection
+legacy behavior at 210° reject
+legacy behavior for a healthy bag at ~355°
+behavior if detection arrives too late for the 210° window
+behavior if the position reference is missing/invalid
 ```
 
-Record timestamped evidence together with rotor/cycle identity.
+Angles are approximate machine references until field measurements freeze the actual timing/lead values.
 
-## 6. Fault-model impact
-
-Until G8 evidence is complete, do not add a hard-coded new production `Fault` enum solely from this document.
-
-The design target is to distinguish at least:
+## 9. Gate impact
 
 ```text
-broken-bag detection event
-sensor/interface fault
-reject requested
-reject completed / not confirmed, if feedback exists
+G3   add deterministic GOOD-vs-REJECT routing tests once detection/position contracts are defined
+     REJECT path must push at the simulated 210° window and suppress normal ~355° push
+     GOOD path must skip 210° and push only at the normal ~355° window
+G7   design review must include the two-disposition model
+G8   mandatory shadow comparison of broken-bag reject at 210° and healthy-bag normal push at ~355°
+G9   live pilot must validate both paths under local commissioning procedure before full acceptance
 ```
 
-Whether a detected broken bag should enter the local SP01 `FAULT` state, mark the current bag as reject-only, inhibit the normal discharge sequence, or remain under a separate machine-level reject function must be decided from the observed legacy behavior and mechanical reject path.
-
-## 7. Gate impact
-
-```text
-G3   software can model a generic broken-bag event only as a non-authoritative test hook
-G7   design review must include this station as a known machine feature
-G8   mandatory: map 210° sensor + spout correlation + legacy reject behavior in shadow
-G9   no new reject-output authority until the G8 mapping is accepted locally
-```
-
-This document is the canonical placeholder for the 210° station until the as-built electrical and mechanical evidence is frozen.
+This document is the canonical description of the broken-bag disposition behavior until more precise as-built evidence is frozen.
