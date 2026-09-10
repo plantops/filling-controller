@@ -22,6 +22,12 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_chip_info.h"
+#include "esp_eth.h"
+#include "esp_eth_mac_spi.h"
+#include "esp_eth_netif_glue.h"
+#include "esp_eth_phy.h"
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "esp_flash.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -53,6 +59,8 @@ constexpr gpio_num_t kEthMosi = GPIO_NUM_13;
 constexpr gpio_num_t kEthMiso = GPIO_NUM_14;
 constexpr gpio_num_t kEthCs = GPIO_NUM_16;
 constexpr gpio_num_t kEthRst = GPIO_NUM_39;
+constexpr gpio_num_t kEthIrq = GPIO_NUM_12;
+constexpr int kEthPhyAddr = 1;
 constexpr int kEthSpiHz = 8 * 1000 * 1000;  // conservative for bring-up
 
 // W5500 common register block.
@@ -68,11 +76,12 @@ struct Stage {
     char detail[96];
 };
 
-constexpr int kStageCount = 6;
+constexpr int kStageCount = 7;
 Stage g_stages[kStageCount] = {
     {"chip", Verdict::kSkip, ""},   {"flash", Verdict::kSkip, ""},
     {"i2c_tca9554", Verdict::kSkip, ""}, {"di_read", Verdict::kSkip, ""},
     {"spi_w5500", Verdict::kSkip, ""},   {"eth_link", Verdict::kSkip, ""},
+    {"eth_dhcp", Verdict::kSkip, ""},
 };
 
 const char* verdict_text(Verdict v) {
@@ -327,6 +336,165 @@ void poll_eth_link() {
     }
 }
 
+
+// ------------------------------------------------------------------- stage 6
+// Full Ethernet stack: MAC driver, netif, DHCP client. This is what produces an
+// IP address visible on the router. The raw-SPI stages above only prove the
+// W5500 responds; they deliberately touch nothing above the physical layer.
+
+esp_eth_handle_t g_eth = nullptr;
+esp_netif_t* g_eth_netif = nullptr;
+volatile bool g_got_ip = false;
+char g_ip_text[16] = "0.0.0.0";
+uint8_t g_eth_mac[6] = {0, 0, 0, 0, 0, 0};
+
+void eth_event_handler(void*, esp_event_base_t, int32_t id, void*) {
+    switch (id) {
+        case ETHERNET_EVENT_CONNECTED:
+            ESP_LOGI(kTag, "ETH EVENT: link connected");
+            break;
+        case ETHERNET_EVENT_DISCONNECTED:
+            ESP_LOGW(kTag, "ETH EVENT: link disconnected");
+            g_got_ip = false;
+            std::snprintf(g_ip_text, sizeof(g_ip_text), "0.0.0.0");
+            break;
+        case ETHERNET_EVENT_START:
+            ESP_LOGI(kTag, "ETH EVENT: driver started");
+            break;
+        case ETHERNET_EVENT_STOP:
+            ESP_LOGW(kTag, "ETH EVENT: driver stopped");
+            break;
+        default:
+            break;
+    }
+}
+
+void ip_event_handler(void*, esp_event_base_t, int32_t, void* data) {
+    const auto* ev = static_cast<ip_event_got_ip_t*>(data);
+    std::snprintf(g_ip_text, sizeof(g_ip_text), IPSTR, IP2STR(&ev->ip_info.ip));
+    g_got_ip = true;
+    ESP_LOGI(kTag, "ETH DHCP: ip=" IPSTR " mask=" IPSTR " gw=" IPSTR,
+             IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.netmask),
+             IP2STR(&ev->ip_info.gw));
+}
+
+void stage_eth_stack() {
+    if (g_stages[4].verdict != Verdict::kPass) {
+        record(6, Verdict::kSkip, "W5500 SPI stage did not pass");
+        return;
+    }
+
+    // Release the raw-SPI probe handle; the Ethernet driver adds its own
+    // device on the same bus and the same CS line.
+    if (g_w5500 != nullptr) {
+        spi_bus_remove_device(g_w5500);
+        g_w5500 = nullptr;
+    }
+
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        record(6, Verdict::kFail, "esp_netif_init=%s", esp_err_to_name(err));
+        return;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        record(6, Verdict::kFail, "event_loop=%s", esp_err_to_name(err));
+        return;
+    }
+
+    err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        record(6, Verdict::kFail, "gpio_install_isr_service=%s",
+               esp_err_to_name(err));
+        return;
+    }
+
+    spi_device_interface_config_t dev{};
+    dev.mode = 0;
+    dev.clock_speed_hz = kEthSpiHz;
+    dev.spics_io_num = kEthCs;
+    dev.queue_size = 20;
+
+    eth_w5500_config_t w5500 = ETH_W5500_DEFAULT_CONFIG(kEthSpi, &dev);
+    w5500.int_gpio_num = kEthIrq;
+
+    eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
+    mac_cfg.rx_task_stack_size = 4096;
+    esp_eth_mac_t* mac = esp_eth_mac_new_w5500(&w5500, &mac_cfg);
+    if (mac == nullptr) {
+        record(6, Verdict::kFail, "esp_eth_mac_new_w5500 returned null");
+        return;
+    }
+
+    eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
+    phy_cfg.phy_addr = kEthPhyAddr;
+    phy_cfg.reset_gpio_num = -1;  // already reset by the SPI probe stage
+    esp_eth_phy_t* phy = esp_eth_phy_new_w5500(&phy_cfg);
+    if (phy == nullptr) {
+        record(6, Verdict::kFail, "esp_eth_phy_new_w5500 returned null");
+        return;
+    }
+
+    esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
+    err = esp_eth_driver_install(&eth_cfg, &g_eth);
+    if (err != ESP_OK) {
+        record(6, Verdict::kFail, "esp_eth_driver_install=%s",
+               esp_err_to_name(err));
+        return;
+    }
+
+    // The W5500 has no built-in MAC address; one must be supplied.
+    err = esp_read_mac(g_eth_mac, ESP_MAC_ETH);
+    if (err != ESP_OK) {
+        record(6, Verdict::kFail, "esp_read_mac=%s", esp_err_to_name(err));
+        return;
+    }
+    err = esp_eth_ioctl(g_eth, ETH_CMD_S_MAC_ADDR, g_eth_mac);
+    if (err != ESP_OK) {
+        record(6, Verdict::kFail, "set MAC=%s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    g_eth_netif = esp_netif_new(&netif_cfg);
+    if (g_eth_netif == nullptr) {
+        record(6, Verdict::kFail, "esp_netif_new returned null");
+        return;
+    }
+    (void)esp_netif_set_hostname(g_eth_netif, "sp01-g1");
+
+    err = esp_netif_attach(g_eth_netif, esp_eth_new_netif_glue(g_eth));
+    if (err != ESP_OK) {
+        record(6, Verdict::kFail, "esp_netif_attach=%s", esp_err_to_name(err));
+        return;
+    }
+
+    (void)esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                     &eth_event_handler, nullptr);
+    (void)esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                     &ip_event_handler, nullptr);
+
+    err = esp_eth_start(g_eth);
+    if (err != ESP_OK) {
+        record(6, Verdict::kFail, "esp_eth_start=%s", esp_err_to_name(err));
+        return;
+    }
+
+    record(6, Verdict::kFail,
+           "driver up, MAC=%02x:%02x:%02x:%02x:%02x:%02x, awaiting DHCP",
+           g_eth_mac[0], g_eth_mac[1], g_eth_mac[2], g_eth_mac[3], g_eth_mac[4],
+           g_eth_mac[5]);
+}
+
+void poll_eth_dhcp() {
+    if (g_eth == nullptr) return;
+    if (g_got_ip) {
+        record(6, Verdict::kPass, "ip=%s mac=%02x:%02x:%02x:%02x:%02x:%02x",
+               g_ip_text, g_eth_mac[0], g_eth_mac[1], g_eth_mac[2], g_eth_mac[3],
+               g_eth_mac[4], g_eth_mac[5]);
+    }
+}
+
 // ---------------------------------------------------------------------- report
 
 void print_summary() {
@@ -344,9 +512,9 @@ void print_summary() {
     }
     ESP_LOGI(kTag, "===== G1 VERDICT: %s =====",
              (fail == 0 && skip == 0) ? "ALL STAGES PASS" : "NOT PASS");
-    if (g_stages[5].verdict != Verdict::kPass) {
-        ESP_LOGI(kTag, "  note: eth_link is re-read every second; autonegotiation");
-        ESP_LOGI(kTag, "        needs 1-3 s and PASS latches on first LNK=1");
+    if (g_stages[6].verdict != Verdict::kPass) {
+        ESP_LOGI(kTag, "  note: DHCP needs a link plus a server; eth_dhcp latches");
+        ESP_LOGI(kTag, "        PASS on the first lease. Link alone gives no IP.");
     }
 }
 
@@ -354,11 +522,11 @@ void heartbeat_task(void*) {
     unsigned long beat = 0;
     for (;;) {
         ++beat;
-        poll_eth_link();
-        ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu link=%s phy=0x%02x", beat,
+        poll_eth_dhcp();
+        ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu link=%s ip=%s", beat,
                  static_cast<unsigned long long>(esp_timer_get_time() / 1000),
                  static_cast<unsigned long>(esp_get_free_heap_size()),
-                 (g_phy_last & 0x01) ? "UP" : "down", g_phy_last);
+                 g_got_ip ? "UP" : "wait", g_ip_text);
         if (beat % 10 == 0) print_summary();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -377,7 +545,8 @@ extern "C" void app_main(void) {
     stage_i2c();
     stage_di();
     stage_spi_w5500();
-    poll_eth_link();  // first sample; heartbeat re-evaluates each second
+    poll_eth_link();  // physical-layer sample before the stack starts
+    stage_eth_stack();
 
     print_summary();
 
