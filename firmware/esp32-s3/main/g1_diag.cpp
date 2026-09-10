@@ -510,7 +510,8 @@ void poll_eth_dhcp() {
         const esp_err_t verr = sp01::vio_start();
         vio_started = true;
         if (verr == ESP_OK) {
-            ESP_LOGI(kTag, "VIRTUAL I/O UI: http://%s/", g_ip_text);
+            ESP_LOGI(kTag, "VIRTUAL BENCH UI: http://%s/", g_ip_text);
+            sp01::vio_control_start();
         } else {
             ESP_LOGE(kTag, "vio_start=%s", esp_err_to_name(verr));
         }
@@ -552,8 +553,8 @@ void heartbeat_task(void*) {
         ++beat;
         poll_eth_dhcp();
 #ifdef CONFIG_SP01_VIRTUAL_IO
-        ESP_LOGI(kTag, "VIRTUAL IO  DI=0x%02x DO=0x%02x (no physical IO driven)",
-                 sp01::vio_di(), sp01::vio_do());
+        ESP_LOGI(kTag, "VIRTUAL IO  DI=0x%02x (no physical IO driven)",
+                 sp01::vio_di());
 #endif
         ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu link=%s ip=%s", beat,
                  static_cast<unsigned long long>(esp_timer_get_time() / 1000),
