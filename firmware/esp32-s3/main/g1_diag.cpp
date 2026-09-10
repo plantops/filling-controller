@@ -290,7 +290,13 @@ void stage_spi_w5500() {
     record(4, Verdict::kPass, "VERSIONR=0x04, SPI link to W5500 confirmed");
 }
 
-void stage_eth_link() {
+// Ethernet autonegotiation takes 1-3 s. A single read taken shortly after
+// reset release is meaningless, so the link stage is evaluated continuously by
+// the heartbeat and latches PASS on the first LNK=1 observed.
+bool g_link_ever_up = false;
+uint8_t g_phy_last = 0;
+
+void poll_eth_link() {
     if (g_stages[4].verdict != Verdict::kPass) {
         record(5, Verdict::kSkip, "SPI stage did not pass");
         return;
@@ -301,11 +307,24 @@ void stage_eth_link() {
         record(5, Verdict::kFail, "PHYCFGR read=%s", esp_err_to_name(err));
         return;
     }
+    g_phy_last = phy;
+
     // PHYCFGR bit0 = LNK, bit1 = SPD (1=100M), bit2 = DPX (1=full).
+    // SPD and DPX are only meaningful while LNK is set.
     const bool link = (phy & 0x01) != 0;
-    record(5, link ? Verdict::kPass : Verdict::kFail,
-           "PHYCFGR=0x%02x link=%s speed=%s duplex=%s", phy, link ? "UP" : "DOWN",
-           (phy & 0x02) ? "100M" : "10M", (phy & 0x04) ? "FULL" : "HALF");
+    if (link) {
+        g_link_ever_up = true;
+        record(5, Verdict::kPass, "PHYCFGR=0x%02x link=UP speed=%s duplex=%s",
+               phy, (phy & 0x02) ? "100M" : "10M",
+               (phy & 0x04) ? "FULL" : "HALF");
+    } else if (!g_link_ever_up) {
+        record(5, Verdict::kFail,
+               "PHYCFGR=0x%02x link=DOWN (autoneg pending, cable, or magnetics)",
+               phy);
+    } else {
+        record(5, Verdict::kFail, "PHYCFGR=0x%02x link=DOWN after having been UP",
+               phy);
+    }
 }
 
 // ---------------------------------------------------------------------- report
@@ -325,16 +344,21 @@ void print_summary() {
     }
     ESP_LOGI(kTag, "===== G1 VERDICT: %s =====",
              (fail == 0 && skip == 0) ? "ALL STAGES PASS" : "NOT PASS");
+    if (g_stages[5].verdict != Verdict::kPass) {
+        ESP_LOGI(kTag, "  note: eth_link is re-read every second; autonegotiation");
+        ESP_LOGI(kTag, "        needs 1-3 s and PASS latches on first LNK=1");
+    }
 }
 
 void heartbeat_task(void*) {
     unsigned long beat = 0;
     for (;;) {
         ++beat;
-        ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu min=%lu", beat,
+        poll_eth_link();
+        ESP_LOGI(kTag, "HB %lu up=%llu ms heap=%lu link=%s phy=0x%02x", beat,
                  static_cast<unsigned long long>(esp_timer_get_time() / 1000),
                  static_cast<unsigned long>(esp_get_free_heap_size()),
-                 static_cast<unsigned long>(esp_get_minimum_free_heap_size()));
+                 (g_phy_last & 0x01) ? "UP" : "down", g_phy_last);
         if (beat % 10 == 0) print_summary();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -353,7 +377,7 @@ extern "C" void app_main(void) {
     stage_i2c();
     stage_di();
     stage_spi_w5500();
-    stage_eth_link();
+    poll_eth_link();  // first sample; heartbeat re-evaluates each second
 
     print_summary();
 
