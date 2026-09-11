@@ -59,20 +59,19 @@ h1{font-size:22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minma
 <div class="grid">
 <div class="card"><b>Status / Trạng thái</b><table><tr><td>Mode</td><td id="mode">-</td></tr><tr><td>State</td><td id="state">-</td></tr><tr><td>Fault</td><td id="fault">-</td></tr><tr><td>Cycle</td><td id="cycle">-</td></tr><tr><td>Weight / Khối lượng</td><td id="weight">-</td></tr><tr><td>Stable</td><td id="stable">-</td></tr></table></div>
 <div class="card"><b>I/O</b><table id="io"></table></div>
-<div class="card warn" id="bench" style="display:none"><b>G2 BENCH DO TEST</b><p><small>MACHINE / SOLENOID / CONTACTOR MUST BE DISCONNECTED. One output only, automatic OFF after 500 ms.</small></p><div id="dobtn"></div><button onclick="benchOff()">ALL OFF</button></div>
+<div class="card warn" id="bench" style="display:none"><b>G2 BENCH DO TEST</b><p><small>MACHINE / SOLENOID / CONTACTOR MUST BE DISCONNECTED. One output only, automatic OFF after 500 ms. Service token required.</small></p><div id="dobtn"></div><button onclick="benchOff()">ALL OFF</button></div>
 <div class="card"><b>Calibration / Hiệu chuẩn</b><p>Service ready: <b id="svc">NO</b></p><button onclick="zero()">SET ZERO</button><br><button onclick="check(20)">CHECK 20 kg</button><span id="c20"></span><br><button onclick="span50()">SET SPAN 50 kg</button><br><button onclick="check(50)">VERIFY 50 kg</button><span id="c50"></span><p><small>Calibration writes require machine stopped, fill switch OFF, all outputs safe, fresh stable weight, calibration writes enabled, and service token.</small></p></div>
 <div class="card"><b>Diagnostics / Chẩn đoán</b><pre id="diag">-</pre></div>
 </div>
 <script>
 let last=null,token=sessionStorage.getItem('sp01token')||'';
-function bits(v){let s='';for(let i=0;i<8;i++)s+=`<tr><td>DI${i+1}</td><td class="${v.di&(1<<i)?'on':''}">${v.di&(1<<i)?'ON':'OFF'}</td><td>DO${i+1}</td><td class="${v.do&(1<<i)?'on':''}">${v.do&(1<<i)?'ON':'OFF'}</td></tr>`;return s}
+function bits(v){let s='';for(let i=0;i<8;i++)s+=`<tr><td>DI${i+1}</td><td class="${v.di&(1<<i)?'on':''}">${v.di&(1<<i)?'ON':'OFF'}</td><td>DO${i+1}</td><td class="${v.commanded_do&(1<<i)?'on':''}">${v.commanded_do&(1<<i)?'ON':'OFF'}</td></tr>`;return s}
 function makeDoButtons(){let s='';for(let i=1;i<=8;i++)s+=`<button onclick="benchDo(${i})">PULSE DO${i}</button>`;dobtn.innerHTML=s}
-async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;last=await r.json();offline.textContent='LIVE';mode.textContent=last.mode;state.textContent=last.state;fault.textContent=last.fault;cycle.textContent=last.cycle;weight.textContent=last.weight.toFixed(3)+' kg';stable.textContent=last.stable?'YES':'NO';svc.textContent=last.service_ready?'YES':'NO';io.innerHTML=bits(last);bench.style.display=last.bench_do_available?'block':'none';diag.textContent=`quality=${last.quality}\nTLB polls=${last.tlb_polls}\nTLB errors=${last.tlb_errors}\nTLB last=${last.tlb_last_error}`;}catch(e){offline.textContent='OFFLINE / MẤT KẾT NỐI'}setTimeout(poll,250)}
+async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;last=await r.json();offline.textContent='LIVE';mode.textContent=last.mode;state.textContent=last.state;fault.textContent=last.fault;cycle.textContent=last.cycle_id;weight.textContent=last.weight.toFixed(3)+' kg';stable.textContent=last.stable?'YES':'NO';svc.textContent=last.service_ready?'YES':'NO';io.innerHTML=bits(last);bench.style.display=last.bench_do_available?'block':'none';diag.textContent=`quality=${last.quality}\ndisposition=${last.disposition}\ndesired_do=${last.desired_do}\ncommanded_do=${last.commanded_do}\nTLB polls=${last.tlb_polls}\nTLB errors=${last.tlb_errors}\nTLB last=${last.tlb_last_error}`;}catch(e){offline.textContent='OFFLINE / MẤT KẾT NỐI'}setTimeout(poll,250)}
 function auth(){if(!token){token=prompt('Service token')||'';sessionStorage.setItem('sp01token',token)}return {'X-Service-Token':token}}
 async function post(path,body=''){const r=await fetch(path,{method:'POST',headers:{...auth(),'Content-Type':'text/plain'},body});const t=await r.text();alert(r.status+' '+t);if(r.status===401||r.status===403){token='';sessionStorage.removeItem('sp01token')}}
-async function benchPost(body){const r=await fetch('/api/bench/do',{method:'POST',headers:{'Content-Type':'text/plain'},body});const t=await r.text();if(!r.ok)alert(r.status+' '+t)}
-function benchDo(n){if(confirm(`Pulse DO${n} for 500 ms? Machine wiring MUST be disconnected.`))benchPost(String(n))}
-function benchOff(){benchPost('0')}
+function benchDo(n){if(confirm(`Pulse DO${n} for 500 ms? Machine wiring MUST be disconnected.`))post('/api/bench/do',String(n))}
+function benchOff(){post('/api/bench/do','0')}
 function zero(){post('/api/cal/zero')}
 function span50(){post('/api/cal/span','50.000')}
 function check(k){if(!last)return;document.getElementById(k===20?'c20':'c50').textContent='  reading '+last.weight.toFixed(3)+' kg, error '+(last.weight-k).toFixed(3)+' kg'}
@@ -111,15 +110,26 @@ esp_err_t state_handler(httpd_req_t* req) noexcept {
     if (!g_snapshot_fn) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
     HmiSnapshot s{};
     if (!g_snapshot_fn(s)) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
-    char json[704]{};
+    char json[1280]{};
     std::snprintf(json, sizeof(json),
-                  "{\"mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\",\"cycle\":%" PRIu32 ",\"weight\":%.3f,"
-                  "\"stable\":%s,\"quality\":%u,\"di\":%u,\"do\":%u,\"service_ready\":%s,\"bench_do_available\":%s,"
+                  "{\"mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\",\"disposition\":\"%s\","
+                  "\"cycle\":%" PRIu32 ",\"cycle_id\":%" PRIu32 ",\"weight\":%.3f,\"stable\":%s,\"quality\":%u,"
+                  "\"di\":%u,\"do\":%u,\"desired_do\":%u,\"commanded_do\":%u,"
+                  "\"broken_bag_detected_us\":%" PRIu64 ",\"broken_bag_peak_kg\":%.3f,\"broken_bag_weight_kg\":%.3f,"
+                  "\"discharge_ref_interval_us\":%" PRIu64 ",\"discharge_due_us\":%" PRIu64 ","
+                  "\"weight_sequence\":%" PRIu32 ",\"weight_sample_time_us\":%" PRIu64 ","
+                  "\"service_ready\":%s,\"bench_do_available\":%s,"
                   "\"tlb_polls\":%" PRIu32 ",\"tlb_errors\":%" PRIu32 ",\"tlb_last_error\":%d}",
                   mode_name(s.controller.mode), state_name(s.controller.state), fault_name(s.controller.fault),
-                  s.controller.cycle_id, static_cast<double>(s.weight.net_kg),
-                  s.weight.stable ? "true" : "false", static_cast<unsigned>(s.weight.quality),
-                  static_cast<unsigned>(pack_inputs(s.inputs)), static_cast<unsigned>(pack_outputs(s.controller.outputs)),
+                  disposition_name(s.controller.disposition), s.controller.cycle_id, s.controller.cycle_id,
+                  static_cast<double>(s.weight.net_kg), s.weight.stable ? "true" : "false",
+                  static_cast<unsigned>(s.weight.quality), static_cast<unsigned>(pack_inputs(s.inputs)),
+                  static_cast<unsigned>(pack_outputs(s.commanded_outputs)),
+                  static_cast<unsigned>(pack_outputs(s.controller.outputs)),
+                  static_cast<unsigned>(pack_outputs(s.commanded_outputs)),
+                  s.controller.broken_bag_detected_us, static_cast<double>(s.controller.broken_bag_peak_kg),
+                  static_cast<double>(s.controller.broken_bag_weight_kg), s.controller.discharge_ref_interval_us,
+                  s.controller.discharge_due_us, s.weight.sequence, s.weight.sample_time_us,
                   s.service_ready ? "true" : "false", g_config.bench_do_enabled ? "true" : "false",
                   s.tlb.polls_ok, s.tlb.comm_errors, static_cast<int>(s.tlb.last_error));
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -163,6 +173,9 @@ esp_err_t span_handler(httpd_req_t* req) noexcept {
 esp_err_t bench_do_handler(httpd_req_t* req) noexcept {
     if (!g_config.bench_do_enabled || !g_bench_do_pulse_fn || !g_bench_do_off_fn) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "bench DO test disabled");
+    }
+    if (!token_ok(req)) {
+        return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "bad service token");
     }
     char body[16]{};
     const int n = httpd_req_recv(req, body, sizeof(body) - 1);
