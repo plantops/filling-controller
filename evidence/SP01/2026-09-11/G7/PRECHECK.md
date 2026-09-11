@@ -6,6 +6,8 @@ Branch: `diag/sp01-g2-g9`
 
 Purpose: use remote time to reconcile canonical views with the executable without fabricating missing physical evidence.
 
+Full adversarial review: [`REDTEAM_R1.md`](REDTEAM_R1.md).
+
 ## Evidence already available
 
 ```text
@@ -19,50 +21,31 @@ G3 dry FSM PASS
 
 G2T, G4, G5, G6 and G8/G9 physical evidence remain incomplete or blocked.
 
-## Static reconciliation finding R1-001 — CRITICAL before G8
-
-The shared controller accepts a `PositionSnapshot` and the canonical REJECT route requires `PositionSnapshot.reject_window` near 210 degrees before DO3 may push a rejected bag.
-
-However, current production `firmware/esp32-s3/main/app_main.cpp` calls:
-
-```cpp
-snapshot = g_controller->tick(now, inputs, weight);
-```
-
-No `PositionSnapshot` is supplied by the production adapter. The default value therefore leaves `reject_window=false`.
-
-Consequence:
+## Red-team R1 summary
 
 ```text
-controller unit tests / virtual bench can exercise REJECT_WAIT -> PUSH
-but current production app_main cannot provide the real 210-degree reject-window event
+R1-001 CRITICAL  production reject-position adapter missing
+R1-002 HIGH      production telemetry too thin for G8 evidence
+R1-003 HIGH      broken-bag production config path incomplete
+R1-004 HIGH      bench DO HTTP command lacks authentication
+R1-005 HIGH      collector/runtime telemetry schema not frozen end-to-end
+R1-006 MEDIUM    desired/commanded/field DO truth not distinguished
+R1-007 MEDIUM    TLB sample timestamp is poll-start timestamp
+R1-008 MEDIUM    service token uses plain HTTP transport
+R1-009 MEDIUM    diagnostic artifact can be mistaken for production build
+R1-010 OPEN      DO1/DO2 behavior after REJECT requires machine evidence
 ```
 
-This is not a hardware failure and is not resolved by inventing a new DI. The as-built mechanism that derives the 210-degree window must be measured/frozen in G8 and connected through a position adapter before live authority.
+The most important blocker remains R1-001: the controller accepts `PositionSnapshot.reject_window`, but current production `app_main.cpp` calls `tick(now, inputs, weight)` without a production position adapter. The real 210-degree method must be measured/frozen in G8; do not invent a ninth DI.
 
-Disposition: **OPEN CRITICAL FINDING**. G7 cannot PASS while this is unresolved.
-
-## Expected commissioning-only disabled values
-
-`make_controller_config()` currently does not populate `broken_bag_loss_trip_kg`, `broken_bag_persist_us`, or `reject_wait_timeout_us`. This is consistent with the policy that broken-bag production thresholds remain disabled/unfrozen until G4/G8 measurement evidence exists. Do not fill these from simulation constants.
-
-## Remote work that can continue
-
-The following can be reviewed or prepared without claiming gate completion:
-
-```text
-V1..V13 source/code consistency
-read-only HMI/collector authority boundary
-production position-adapter interface and telemetry fields
-G8 measurement checklist for deriving 210/355 timing
-red-team list of unresolved constants and ownership paths
-```
+`make_controller_config()` currently leaves broken-bag detector values disabled. This is correct while G4/G8 values are unknown, but all detector parameters including a finite reject-wait timeout must be introduced as one validated commissioning set before live authority.
 
 ## Gate status
 
 ```text
-G7 = PENDING / PRECHECK STARTED
-R1-001 = OPEN CRITICAL
+G7 = PENDING / RED-TEAM R1 COMPLETE, FINDINGS OPEN
+G8 = BLOCKED
+G9 = BLOCKED
 ```
 
-Formal G7 PASS still requires all canonical views reconciled against the physical evidence owned by G2/G2T/G4/G5/G6 and no unresolved critical R1 finding.
+Formal G7 PASS still requires the physical evidence owned by G2/G2T/G4/G5/G6 and closure or explicit evidence-based disposition of R1 findings.
