@@ -32,6 +32,9 @@ sp01::ControllerConfig make_controller_config() noexcept {
     c.target_kg = static_cast<float>(CONFIG_SP01_TARGET_G) / 1000.0F;
     c.coarse_to_fine_kg = static_cast<float>(CONFIG_SP01_COARSE_TO_FINE_G) / 1000.0F;
     c.cutoff_margin_kg = static_cast<float>(CONFIG_SP01_CUTOFF_MARGIN_G) / 1000.0F;
+    c.broken_bag_loss_trip_kg = static_cast<float>(CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G) / 1000.0F;
+    c.broken_bag_persist_us = static_cast<std::uint64_t>(CONFIG_SP01_BROKEN_BAG_PERSIST_MS) * 1000ULL;
+    c.reject_wait_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS) * 1000ULL;
     c.weight_stale_us = static_cast<std::uint64_t>(CONFIG_SP01_WEIGHT_STALE_MS) * 1000ULL;
     c.bag_acquire_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_BAG_ACQUIRE_TIMEOUT_MS) * 1000ULL;
     c.coarse_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_COARSE_TIMEOUT_MS) * 1000ULL;
@@ -42,6 +45,15 @@ sp01::ControllerConfig make_controller_config() noexcept {
     c.discharge_countdown_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS);
     c.discharge_lead_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_LEAD_COUNTS);
     return c;
+}
+
+bool valid_broken_bag_config(const sp01::ControllerConfig& c) noexcept {
+    const bool has_loss = c.broken_bag_loss_trip_kg > 0.0F;
+    const bool has_persist = c.broken_bag_persist_us > 0;
+    const bool has_timeout = c.reject_wait_timeout_us > 0;
+    const bool any = has_loss || has_persist || has_timeout;
+    const bool all = has_loss && has_persist && has_timeout;
+    return !any || all;
 }
 
 bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
@@ -204,6 +216,11 @@ extern "C" void app_main(void) {
     static sp01::BoardIo io;
     static sp01::Tlb485 tlb;
     g_controller_config = make_controller_config();
+    if (!valid_broken_bag_config(g_controller_config)) {
+        ESP_LOGE(kTag,
+                 "invalid broken-bag config: loss trip, persistence and reject timeout must be all zero or all non-zero");
+        ESP_ERROR_CHECK(ESP_ERR_INVALID_ARG);
+    }
     static sp01::Controller controller(g_controller_config);
 
     g_io = &io;
@@ -211,6 +228,9 @@ extern "C" void app_main(void) {
     g_controller = &controller;
 
     ESP_LOGI(kTag, "SP01 v0.1 ESP-IDF/C++ controller");
+    if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) {
+        ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
+    }
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
     ESP_LOGW(kTag, "G2 BENCH BUILD: normal process outputs suppressed; HMI one-hot DO pulse only");
 #endif
