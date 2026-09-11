@@ -23,6 +23,7 @@ sp01::Tlb485* g_tlb = nullptr;
 portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 sp01::InputImage g_inputs{};
 sp01::ControllerSnapshot g_controller_snapshot{};
+sp01::OutputImage g_commanded_outputs{};
 sp01::ControllerConfig g_controller_config{};
 std::uint8_t g_bench_do_channel = 0;
 std::uint64_t g_bench_do_until_us = 0;
@@ -67,6 +68,7 @@ bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
     portENTER_CRITICAL(&g_status_mux);
     out.inputs = g_inputs;
     out.controller = g_controller_snapshot;
+    out.commanded_outputs = g_commanded_outputs;
     portEXIT_CRITICAL(&g_status_mux);
     out.weight = g_tlb->snapshot();
     out.tlb = g_tlb->diagnostics();
@@ -76,6 +78,7 @@ bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
     out.service_ready = machine_stopped && fill_switch_off &&
                         out.controller.state == sp01::State::WaitPermissive &&
                         sp01::all_outputs_off(out.controller.outputs) &&
+                        sp01::all_outputs_off(out.commanded_outputs) &&
                         out.weight.stable && weight_fresh_now(out.weight);
     return true;
 }
@@ -146,11 +149,13 @@ void control_task(void*) {
         sp01::InputImage inputs{};
         esp_err_t io_err = g_io->read_inputs(inputs);
         sp01::ControllerSnapshot snapshot{};
+        sp01::OutputImage commanded_outputs{};
 
         if (io_err != ESP_OK) {
             g_controller->force_fault(sp01::Fault::IoFault, now);
             snapshot = g_controller->snapshot();
             (void)g_io->force_safe();
+            commanded_outputs = g_io->last_commanded_outputs();
         } else {
             inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
                               ? sp01::OperationMode::Auto
@@ -179,7 +184,6 @@ void control_task(void*) {
             if (bench_channel >= 1 && bench_channel <= 8) {
                 physical_outputs.channels[bench_channel - 1] = true;
             }
-            snapshot.outputs = physical_outputs;
 #endif
 
             io_err = g_io->commit_outputs(physical_outputs);
@@ -187,15 +191,14 @@ void control_task(void*) {
                 (void)g_io->force_safe();
                 g_controller->force_fault(sp01::Fault::IoFault, now);
                 snapshot = g_controller->snapshot();
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-                snapshot.outputs = sp01::safe_output_image();
-#endif
             }
+            commanded_outputs = g_io->last_commanded_outputs();
         }
 
         portENTER_CRITICAL(&g_status_mux);
         g_inputs = inputs;
         g_controller_snapshot = snapshot;
+        g_commanded_outputs = commanded_outputs;
         portEXIT_CRITICAL(&g_status_mux);
 
         if (snapshot.state != previous_state) {
@@ -252,6 +255,7 @@ extern "C" void app_main(void) {
 
     portENTER_CRITICAL(&g_status_mux);
     g_controller_snapshot = controller.snapshot();
+    g_commanded_outputs = io.last_commanded_outputs();
     portEXIT_CRITICAL(&g_status_mux);
 
     xTaskCreatePinnedToCore(control_task, "sp01_control", 4096, nullptr, 15, nullptr, 1);
