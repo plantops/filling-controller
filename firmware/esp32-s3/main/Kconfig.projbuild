@@ -20,6 +20,32 @@ config SP01_CUTOFF_MARGIN_G
     range 0 5000
     default 0
 
+config SP01_BROKEN_BAG_LOSS_TRIP_G
+    int "Broken-bag net-weight loss trip (g; 0 disables)"
+    range 0 10000
+    default 0
+    help
+        Production value must come from measured G4/G8 TLB and machine traces.
+        Leave 0 until commissioning evidence freezes the detector threshold.
+
+config SP01_BROKEN_BAG_PERSIST_MS
+    int "Broken-bag loss persistence (ms; 0 disables)"
+    range 0 5000
+    default 0
+    help
+        Production value must come from measured G4/G8 evidence. The detector
+        is disabled unless loss trip, persistence and reject-wait timeout are
+        all non-zero.
+
+config SP01_REJECT_WAIT_TIMEOUT_MS
+    int "Reject-window wait timeout (ms; 0 disables detector)"
+    range 0 30000
+    default 0
+    help
+        Bounds REJECT_WAIT if the commissioned reject-position event is absent.
+        Production value must be frozen from G8 timing evidence. Do not enable
+        the broken-bag detector without a non-zero bounded timeout.
+
 config SP01_WEIGHT_STALE_MS
     int "Maximum weight age (ms)"
     range 20 5000
