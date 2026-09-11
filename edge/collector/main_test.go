@@ -23,29 +23,62 @@ func TestParseSources(t *testing.T) {
 	}
 }
 
-func TestStoreTracksControllerChanges(t *testing.T) {
-	s := NewStore(10)
-	t0 := time.Unix(100, 0).UTC()
-	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0, Online: true, Data: map[string]any{
-		"state": "COARSE_FILL", "fault": "NONE", "disposition": "UNDECIDED", "do": float64(251),
-	}})
-	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(time.Second), Online: true, Data: map[string]any{
-		"state": "REJECT_WAIT", "fault": "NONE", "disposition": "REJECT", "do": float64(3),
-	}})
-	events := s.Events("SP01", 20)
-	seenState, seenDisposition, seenDO := false, false, false
-	for _, ev := range events {
-		switch ev.Kind {
-		case "state":
-			seenState = true
-		case "disposition":
-			seenDisposition = true
-		case "do":
-			seenDO = true
+func TestNormalizeTelemetryLegacyAliases(t *testing.T) {
+	got := normalizeTelemetry(map[string]any{
+		"cycle":              float64(7),
+		"do":                 float64(3),
+		"broken_detected_us": float64(1234),
+	})
+	if got["schema_version"] != telemetrySchemaVersion {
+		t.Fatalf("schema version missing: %#v", got)
+	}
+	if got["cycle_id"] != float64(7) || got["commanded_do"] != float64(3) || got["desired_do"] != float64(3) || got["broken_bag_detected_us"] != float64(1234) {
+		t.Fatalf("legacy aliases not normalized: %#v", got)
+	}
+	for _, legacy := range []string{"cycle", "do", "broken_detected_us"} {
+		if _, ok := got[legacy]; ok {
+			t.Fatalf("legacy key %s leaked into canonical schema: %#v", legacy, got)
 		}
 	}
-	if !seenState || !seenDisposition || !seenDO {
-		t.Fatalf("missing tracked events: %#v", events)
+}
+
+func TestCanonicalTelemetryWinsOverAliases(t *testing.T) {
+	got := normalizeTelemetry(map[string]any{
+		"cycle":                  float64(7),
+		"cycle_id":               float64(8),
+		"do":                     float64(3),
+		"desired_do":             float64(251),
+		"commanded_do":           float64(0),
+		"broken_detected_us":     float64(1234),
+		"broken_bag_detected_us": float64(5678),
+	})
+	if got["cycle_id"] != float64(8) || got["desired_do"] != float64(251) || got["commanded_do"] != float64(0) || got["broken_bag_detected_us"] != float64(5678) {
+		t.Fatalf("canonical values did not win: %#v", got)
+	}
+}
+
+func TestStoreTracksControllerChanges(t *testing.T) {
+	s := NewStore(20)
+	t0 := time.Unix(100, 0).UTC()
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0, Online: true, Data: map[string]any{
+		"state": "COARSE_FILL", "fault": "NONE", "disposition": "UNDECIDED",
+		"cycle_id": float64(1), "desired_do": float64(251), "commanded_do": float64(251),
+		"broken_bag_detected_us": float64(0),
+	}})
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(time.Second), Online: true, Data: map[string]any{
+		"state": "REJECT_WAIT", "fault": "NONE", "disposition": "REJECT",
+		"cycle_id": float64(1), "desired_do": float64(3), "commanded_do": float64(3),
+		"broken_bag_detected_us": float64(900000),
+	}})
+	events := s.Events("SP01", 20)
+	seen := map[string]bool{}
+	for _, ev := range events {
+		seen[ev.Kind] = true
+	}
+	for _, key := range []string{"state", "disposition", "desired_do", "commanded_do", "broken_bag_detected_us"} {
+		if !seen[key] {
+			t.Fatalf("missing tracked event %s: %#v", key, events)
+		}
 	}
 }
 
