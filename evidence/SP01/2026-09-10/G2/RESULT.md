@@ -1,6 +1,6 @@
 # SP01 G2 physical dummy I/O + Ethernet — 2026-09-10
 
-Status: **ACTIVE — 1 h soak PASS; DI1..DI8 PASS; physical DO evidence pending**
+Status: **ACTIVE — 1 h soak PASS; DI1..DI8 PASS; physical DO/reset-safe evidence DEFERRED**
 
 Branch: `diag/sp01-g2-g9`
 
@@ -85,9 +85,11 @@ DI8 PASS
 G2-DI PASS
 ```
 
-## G2 remaining evidence
+## Deferred G2 physical output evidence
 
-G2 does **not** pass yet. Still required with machine actuator wiring disconnected:
+The operator is currently away from the physical board and explicitly deferred the DO test. This is not a PASS and does not waive the criterion.
+
+Still required later with machine actuator wiring disconnected:
 
 ```text
 DO1..DO8: dummy-load OFF -> ON pulse -> automatic OFF, one-hot, no adjacent output
@@ -99,4 +101,7 @@ Completed for this bench session:
 ```text
 1 h soak / sustained Ethernet  PASS
 DI1..DI8                       PASS
+DO1..DO8 + reset-safe          DEFERRED
 ```
+
+G2 remains ACTIVE until the deferred physical output evidence is completed.
