@@ -15,6 +15,20 @@ import (
 	"time"
 )
 
+const telemetrySchemaVersion = 1
+
+var trackedTelemetryKeys = []string{
+	"mode",
+	"state",
+	"fault",
+	"disposition",
+	"cycle_id",
+	"di",
+	"desired_do",
+	"commanded_do",
+	"broken_bag_detected_us",
+}
+
 type Source struct {
 	ID  string
 	URL string
@@ -66,7 +80,46 @@ func equalJSONValue(a, b any) bool {
 	return string(ab) == string(bb)
 }
 
+// normalizeTelemetry freezes the collector-facing schema while the embedded
+// /api/state endpoint migrates from legacy field names. Canonical keys win;
+// aliases are accepted only as read compatibility and are not re-emitted.
+func normalizeTelemetry(data map[string]any) map[string]any {
+	if data == nil {
+		return nil
+	}
+	out := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		out[k] = v
+	}
+	out["schema_version"] = telemetrySchemaVersion
+	if _, ok := out["cycle_id"]; !ok {
+		if v, exists := out["cycle"]; exists {
+			out["cycle_id"] = v
+		}
+	}
+	if _, ok := out["broken_bag_detected_us"]; !ok {
+		if v, exists := out["broken_detected_us"]; exists {
+			out["broken_bag_detected_us"] = v
+		}
+	}
+	if _, ok := out["commanded_do"]; !ok {
+		if v, exists := out["do"]; exists {
+			out["commanded_do"] = v
+		}
+	}
+	if _, ok := out["desired_do"]; !ok {
+		if v, exists := out["do"]; exists {
+			out["desired_do"] = v
+		}
+	}
+	delete(out, "cycle")
+	delete(out, "broken_detected_us")
+	delete(out, "do")
+	return out
+}
+
 func (s *Store) Update(next Snapshot) {
+	next.Data = normalizeTelemetry(next.Data)
 	s.mu.Lock()
 	prev, hadPrev := s.latest[next.SpoutID]
 	s.latest[next.SpoutID] = next
@@ -75,7 +128,7 @@ func (s *Store) Update(next Snapshot) {
 		if prev.Online != next.Online {
 			s.appendEventLocked(Event{SpoutID: next.SpoutID, At: next.ReceivedAt, Kind: "online", From: prev.Online, To: next.Online})
 		}
-		for _, key := range []string{"mode", "state", "fault", "disposition", "cycle", "di", "do", "broken_detected_us"} {
+		for _, key := range trackedTelemetryKeys {
 			a := trackedValue(prev.Data, key)
 			b := trackedValue(next.Data, key)
 			if !equalJSONValue(a, b) {
@@ -260,7 +313,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	a.headers(w)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "spouts": len(a.sources), "time": time.Now().UTC()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "spouts": len(a.sources), "schema_version": telemetrySchemaVersion, "time": time.Now().UTC()})
 }
 
 func (a *App) handleSpouts(w http.ResponseWriter, r *http.Request) {
@@ -382,6 +435,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	log.Printf("SP01 collector listen=%s spouts=%d poll=%s read-only=true", listen, len(sources), pollEvery)
+	log.Printf("SP01 collector listen=%s spouts=%d poll=%s schema=%d read-only=true", listen, len(sources), pollEvery, telemetrySchemaVersion)
 	log.Fatal(server.ListenAndServe())
 }
