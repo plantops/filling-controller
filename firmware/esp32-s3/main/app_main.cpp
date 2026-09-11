@@ -4,7 +4,9 @@
 #include "sp01/web_hmi.hpp"
 
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -55,6 +57,39 @@ bool valid_broken_bag_config(const sp01::ControllerConfig& c) noexcept {
     const bool any = has_loss || has_persist || has_timeout;
     const bool all = has_loss && has_persist && has_timeout;
     return !any || all;
+}
+
+void log_build_and_config_identity() noexcept {
+    const esp_app_desc_t* app = esp_app_get_description();
+    if (app) {
+        ESP_LOGI(kTag,
+                 "build project=%s version=%s idf=%s elf_sha256=%02x%02x%02x%02x%02x%02x%02x%02x reset_reason=%d",
+                 app->project_name, app->version, app->idf_ver,
+                 static_cast<unsigned>(app->app_elf_sha256[0]),
+                 static_cast<unsigned>(app->app_elf_sha256[1]),
+                 static_cast<unsigned>(app->app_elf_sha256[2]),
+                 static_cast<unsigned>(app->app_elf_sha256[3]),
+                 static_cast<unsigned>(app->app_elf_sha256[4]),
+                 static_cast<unsigned>(app->app_elf_sha256[5]),
+                 static_cast<unsigned>(app->app_elf_sha256[6]),
+                 static_cast<unsigned>(app->app_elf_sha256[7]),
+                 static_cast<int>(esp_reset_reason()));
+    }
+    ESP_LOGI(kTag,
+             "config control_ms=%d target_g=%d coarse_to_fine_g=%d cutoff_margin_g=%d weight_stale_ms=%d "
+             "broken_loss_g=%d broken_persist_ms=%d reject_timeout_ms=%d discharge_counts=%d discharge_lead=%d "
+             "di_invert=0x%02x do_invert=0x%02x tlb_enable=%d tlb_baud=%d tlb_slave=%d tlb_poll_ms=%d",
+             CONFIG_SP01_CONTROL_PERIOD_MS, CONFIG_SP01_TARGET_G, CONFIG_SP01_COARSE_TO_FINE_G,
+             CONFIG_SP01_CUTOFF_MARGIN_G, CONFIG_SP01_WEIGHT_STALE_MS,
+             CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G, CONFIG_SP01_BROKEN_BAG_PERSIST_MS,
+             CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS, CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS,
+             CONFIG_SP01_DISCHARGE_LEAD_COUNTS, CONFIG_SP01_DI_INVERT_MASK, CONFIG_SP01_DO_INVERT_MASK,
+#if CONFIG_SP01_TLB_ENABLE
+             1,
+#else
+             0,
+#endif
+             CONFIG_SP01_TLB_BAUD, CONFIG_SP01_TLB_SLAVE, CONFIG_SP01_TLB_POLL_MS);
 }
 
 bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
@@ -231,6 +266,7 @@ extern "C" void app_main(void) {
     g_controller = &controller;
 
     ESP_LOGI(kTag, "SP01 v0.1 ESP-IDF/C++ controller");
+    log_build_and_config_identity();
     if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) {
         ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
     }
