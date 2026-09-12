@@ -1,4 +1,4 @@
-# SP01 G7 rapid-prototype release readiness
+# SP01 rapid-prototype release readiness
 
 Date: 2026-09-12
 
@@ -6,7 +6,7 @@ Date: 2026-09-12
 
 The project owner/operator instructed the commissioning effort to stop expanding bench rigor and to move a working prototype to the field quickly without rewriting the controller core.
 
-For the rapid-prototype scope, software/view/release readiness is accepted as complete. This does not convert deferred physical checks into fabricated PASS results.
+For the rapid-prototype scope, software/view/release readiness is accepted as complete. This is a release milestone only. It is not a formal G7 PASS and does not override `docs/GATE_EXECUTION_PLAN.md` gate preconditions.
 
 ## Frozen field image
 
@@ -38,14 +38,17 @@ TLB485 disabled
 normal process outputs suppressed before the board write
 ```
 
-Therefore the first machine visit is a shadow exercise rather than a live-actuator trial.
+Therefore the first machine visit is a non-authoritative prototype shadow/data-collection exercise rather than a formal G8 acceptance run or live-actuator trial.
 
-## Prototype G7 interpretation
+## Gate interpretation
 
 ```text
-G7 rapid-prototype software/view/release readiness: PASS
-full formal G7 physical evidence package: DEFERRED
+rapid-prototype software/view/release milestone: PASS
+formal G7 gate:                              PENDING
+formal G8 gate:                              BLOCKED-HW
 ```
+
+Formal G7 remains governed by `docs/GATE_EXECUTION_PLAN.md` and requires the documented prerequisite evidence and red-team closure. Formal G8 cannot PASS or be treated as entered under the strict gate chain until its documented preconditions are met.
 
 Deferred rather than claimed:
 
@@ -53,14 +56,13 @@ Deferred rather than claimed:
 G2T thermal/serviceability qualification
 G4 real TLB dynamic-weighing measurements
 G5 formal calibration campaign
-G6 long network-loss qualification
+G6 network-loss qualification
+formal G7 review completion
 real 210/355 timing authority
 ```
 
-These items can be reopened individually if field behavior requires them.
-
 ## Next authority boundary
 
-The frozen shadow artifact is ready for G8 rapid field shadow with real DI and Ethernet/HMI. It is not a G9 live-authority image because dummy-weight mode suppresses normal process outputs.
+The frozen artifact may be used locally to collect real-DI/Ethernet/HMI shadow observations while machine actuator outputs remain isolated. Those observations may become evidence for later gates, but do not themselves advance G7 or G8 unless the documented exit criteria and preconditions are satisfied.
 
-G8/G9 remain physical site decisions and must not be marked complete without local evidence.
+G8/G9 remain physical site gates and must not be marked complete without local evidence. G9 authority remains prohibited until formal G8 completion and the documented local G8-to-G9 authorization.
