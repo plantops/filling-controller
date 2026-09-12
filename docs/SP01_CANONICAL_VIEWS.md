@@ -2,37 +2,58 @@
 
 Status: canonical working view pack for commissioning branch `diag/sp01-g2-g9`.
 
-This file is the compact source of truth for the 13 engineering views used by firmware, HMI, commissioning and long-term maintenance. Historical Yellow/Purple/Red team material is design input only.
+The project now treats **V1..V11 as the core canonical engineering views**. V12 and V13 remain commissioning extensions because weighing-quality/calibration and eight-spout topology are important, but they do not change the eleven-view control language.
+
+Historical Yellow/Purple/Red-team material and the older `SP01_ENGINEERING_VIEWS.md` are review context only.
 
 ## Ground-truth precedence
 
 When two representations disagree, use this order:
 
 ```text
-1. measured installed-machine electrical/mechanical evidence
+1. measured installed-machine electrical/mechanical/process evidence
 2. executable C++ controller + board adapter
-3. frozen I/O / weighing / topology contracts
+3. frozen I/O / weighing / reject / topology contracts
 4. this canonical view pack
 5. generated HMI/diagram projections
 6. historical team proposals
 ```
 
-Current installed-process truths used here:
+Current process truths used here:
 
 ```text
 controller       ESP32-S3 / ESP-IDF / C++17 / FreeRTOS
 one controller   one spout; SP01 is not master of SP02..SP08
 weight           load cell -> LAUMAS TLB485 -> isolated RS485 -> WeightSnapshot
 I/O              8DI + 8DO; no continuous-weight DI
-broken bag       qualified net-weight decrease while filling is active
-on broken bag    immediately remove DO4..DO8 filling energy
-reject route     latch REJECT -> push/eject near 210 deg -> no later 355 deg push
-good route       skip 210 deg -> normal push/eject near 355 deg
-push actuator    semantic DO3 = bag.push for both routes
-cloud/HMI        supervisory only; never owns cutoff/interlock/eject timing
+broken bag       qualified measured-weight loss while filling is active
+on broken bag    latch REJECT and remove DO4..DO8 filling energy in the same decision
+reject route     AUTO: wait reject window near 210 deg -> DO3 push -> no later 355 deg push
+good route       AUTO: skip reject window -> normal A/B timing -> DO3 push near 355 deg
+manual reject    latch REJECT, remove DO4..DO8, complete without automatic eject
+push actuator    semantic DO3 = bag.push for both automatic routes
+cloud/HMI        supervisory; never owns cutoff/interlock/eject timing
 ```
 
-Numeric detector thresholds, the exact 210/355 timing windows and actuator lead remain commissioning values until G4/G8 evidence freezes them.
+Numeric detector thresholds, the real 210/355 timing windows and actuator lead remain commissioning values until G4/G8 evidence freezes them.
+
+## Core 11-view review status
+
+`COMPLETE` means the view itself is internally reconciled with current executable code and known bench evidence. It does **not** mean every physical commissioning gate is complete.
+
+| View | Review | Runtime / evidence boundary |
+|---|---|---|
+| V1 Runtime timeline | COMPLETE | full event producer is still partial; collector currently records a subset of semantic changes |
+| V2 State/process matrix | COMPLETE | matches current `sp01::Controller` behavior |
+| V3 Routing flow | COMPLETE | real installed 210-degree adapter remains G8 evidence |
+| V4 Predicates | COMPLETE | corrected to current high-water/persistence detector; production threshold still disabled/unfrozen |
+| V5 Authority graph | COMPLETE | central collector/HMI is read-only supervisory |
+| V6 Executable engine | COMPLETE | active G2 bench firmware is a commissioning artifact, not production authority |
+| V7 Physical I/O | COMPLETE as map | G2 DI1..DI8 PASS; physical DO evidence remains active |
+| V8 Fault/reject matrix | COMPLETE | AUTO and MANUAL reject behavior separated |
+| V9 Supervisory projection | COMPLETE | projection only; not a second FSM |
+| V10 Communication/data contract | COMPLETE | `desired_do` and `commanded_do` are distinct; true physical DO sensing is not currently published |
+| V11 Digital-twin/HMI | COMPLETE as UI contract | live values appear only when telemetry exists; missing values remain unavailable |
 
 ---
 
@@ -44,39 +65,57 @@ Canonical row:
 
 ```text
 t_us | spout_id | cycle_id | mode | state | fault | disposition |
-DI[7:0] | desired_DO[7:0] | physical_DO[7:0] |
+DI[7:0] | desired_DO[7:0] | commanded_DO[7:0] | physical_DO[7:0]? |
 weight_kg | weight_quality | stable | event
 ```
 
-Required events include:
+`physical_DO` is optional because the current board/API reports controller desired output and board command, not an independent electrical feedback measurement.
+
+Required event classes for final commissioning evidence:
 
 ```text
 boot / reset_reason
 state_enter
-DI_change / DO_change
+DI_change / desired_DO_change / commanded_DO_change
 weight_sample / weight_stale / weight_recovered
 coarse_to_fine / normal_cutoff
 broken_bag_candidate / broken_bag_detected
-fill_energy_off
-reject_latched
+fill_energy_off / reject_latched
 reject_window / reject_push_on / reject_push_off
 normal_discharge_ref_a / ref_b / normal_push_on / normal_push_off
 complete / fault / fault_clear
 network_link_down / network_link_up
 ```
 
-For REJECT evidence the ordering must be visible:
+Current collector coverage is intentionally smaller: it records discovery/online and changes to mode, state, fault, disposition, cycle_id, DI, desired/commanded DO and broken-bag detection timestamp. That subset is useful for V11 but is not yet the complete V1 evidence stream.
+
+REJECT ordering must be visible:
 
 ```text
-negative-weight condition -> detector accepted -> DO4..DO8 OFF -> REJECT latched
--> ~210 deg reject window -> DO3 pulse -> no ~355 deg pulse
+qualified measured loss
+-> detector accepted
+-> disposition REJECT latched
+-> DO4..DO8 absent from the same returned output image
+-> AUTO only: reject window near 210 deg
+-> DO3 pulse once
+-> no later normal 355 deg pulse
 ```
 
-For GOOD evidence:
+GOOD ordering:
 
 ```text
-normal fill -> settle -> no ~210 deg pulse -> normal ~355 deg DO3 pulse
+normal fill -> cutoff -> settle/stable -> GOOD
+-> normal A/B discharge timing -> DO3 pulse near 355 deg
 ```
+
+MANUAL reject ordering:
+
+```text
+qualified measured loss -> REJECT latched -> DO4..DO8 OFF -> COMPLETE
+(no automatic DO3 eject)
+```
+
+Bench status relevant to V1: G2 one-hour USB/Ethernet soak PASS; physical DI1..DI8 PASS; physical DO loopback evidence is active in `evidence/SP01/2026-09-10/G2/RESULT.md`.
 
 ---
 
@@ -84,32 +123,32 @@ normal fill -> settle -> no ~210 deg pulse -> normal ~355 deg DO3 pulse
 
 Purpose: primary human-readable sequential logic view. It must match `sp01::Controller`.
 
-| State | Main condition / transition | Main output behavior |
+| State | Main condition / transition | Current output image |
 |---|---|---|
-| `WAIT_PERMISSIVE` | wait for AUTO permissives or MANUAL request | all OFF |
+| `WAIT_PERMISSIVE` | AUTO waits permissives; MANUAL waits request | all OFF |
 | `WAIT_FILL_POSITION` | AUTO armed fill-position edge -> `BAG_ACQUIRE` | all OFF |
-| `BAG_ACQUIRE` | bag present -> `BAG_VERIFY`; timeout -> fault | scanner + bag-detect air |
-| `BAG_VERIFY` | verified bag -> `TARE_READY` | scanner + bag-detect air |
-| `TARE_READY` | fresh GOOD weight -> `COARSE_FILL` | scanner + bag-detect air |
-| `COARSE_FILL` | normal: weight >= coarse threshold -> `FINE_FILL`; broken-bag detector -> `REJECT_WAIT` in AUTO | A+B+C dosing + filling motor + aeration; detector decision removes DO4..DO8 immediately |
-| `FINE_FILL` | normal: cutoff threshold -> `CUTOFF`; broken-bag detector -> `REJECT_WAIT` in AUTO | A+C dosing + filling motor + aeration; detector decision removes DO4..DO8 immediately |
-| `CUTOFF` | immediate -> `SETTLE` | fill energy OFF |
-| `SETTLE` | stable after minimum settle -> GOOD; MANUAL `COMPLETE`, AUTO `WAIT_DISCHARGE` | fill energy OFF |
-| `REJECT_WAIT` | REJECT latched; wait semantic reject window near 210 deg -> `PUSH`; timeout -> fault | DO4..DO8 OFF; DO3 OFF until reject window |
-| `WAIT_DISCHARGE` | GOOD only; normal A/B timing -> due -> `PUSH` | fill energy OFF |
-| `PUSH` | AUTO DO3 pulse for current disposition | bag.push only |
-| `COMPLETE` | cycle complete; next cycle resets disposition | all OFF |
+| `BAG_ACQUIRE` | bag present -> `BAG_VERIFY`; timeout -> `BAG_MISSING` | DO1 scanner + DO2 bag-detect air |
+| `BAG_VERIFY` | retained bag -> `TARE_READY` | DO1 + DO2 |
+| `TARE_READY` | fresh GOOD weight -> `COARSE_FILL` | DO1 + DO2 |
+| `COARSE_FILL` | normal threshold -> `FINE_FILL`; qualified loss -> AUTO `REJECT_WAIT`, MANUAL `COMPLETE` | DO1 + DO2 + DO4..DO8; detector decision removes DO4..DO8 immediately |
+| `FINE_FILL` | cutoff threshold -> `CUTOFF`; qualified loss -> AUTO `REJECT_WAIT`, MANUAL `COMPLETE` | DO1 + DO2 + DO4 + DO6 + DO7 + DO8; detector decision removes DO4..DO8 immediately |
+| `CUTOFF` | immediate -> `SETTLE` | DO1 + DO2; DO4..DO8 OFF |
+| `SETTLE` | stable after minimum settle -> GOOD; MANUAL `COMPLETE`, AUTO `WAIT_DISCHARGE` | DO1 + DO2; fill energy OFF |
+| `REJECT_WAIT` | AUTO REJECT latched; reject window -> `PUSH`; timeout -> fault | DO1 + DO2; DO3 OFF; DO4..DO8 OFF |
+| `WAIT_DISCHARGE` | GOOD only; A/B timing produces due time -> `PUSH` | DO1 + DO2; fill energy OFF |
+| `PUSH` | AUTO pulse for selected GOOD/REJECT route | DO3 only |
+| `COMPLETE` | cycle increments; next cycle re-arms | all OFF |
 | `FAULT` | latched controller/measurement fault | all OFF |
 
 Disposition model:
 
 ```text
-UNDECIDED during active filling
-GOOD after successful normal settle
-REJECT immediately when broken-bag detector is accepted
+UNDECIDED  during acquisition/fill before final classification
+GOOD       after successful normal settle
+REJECT     immediately when broken-bag detector is accepted
 ```
 
-`REJECT` is a controlled bag disposition, not automatically a controller-wide fault.
+Important output distinction: the confirmed immediate broken-bag action is **DO4..DO8 OFF**. Current executable logic retains DO1 and DO2 through `REJECT_WAIT`; no additional machine behavior for DO1/DO2 is assumed without G8 evidence.
 
 ---
 
@@ -120,56 +159,76 @@ Purpose: explain allowed paths and first blocking condition.
 ```mermaid
 flowchart TD
     A[WAIT_PERMISSIVE] --> B[WAIT_FILL_POSITION]
-    B --> C[BAG_ACQUIRE]
+    A -->|MANUAL request| C[BAG_ACQUIRE]
+    B --> C
     C --> D[BAG_VERIFY]
     D --> E[TARE_READY]
     E --> F[COARSE_FILL]
     F -->|normal weight gain| G[FINE_FILL]
-    F -->|qualified weight loss| R[REJECT_WAIT / DO4..DO8 OFF]
+    F -->|qualified loss AUTO| R[REJECT_WAIT / DO4..DO8 OFF]
+    F -->|qualified loss MANUAL| M[COMPLETE / REJECT / no auto push]
     G -->|target cutoff| H[CUTOFF]
-    G -->|qualified weight loss| R
+    G -->|qualified loss AUTO| R
+    G -->|qualified loss MANUAL| M
     H --> I[SETTLE]
-    I -->|GOOD| N[WAIT_DISCHARGE ~355]
+    I -->|AUTO GOOD| N[WAIT_DISCHARGE]
+    I -->|MANUAL GOOD| M2[COMPLETE]
     R -->|reject window ~210| P[PUSH]
     N -->|normal due ~355| P
     P --> CYCLE[COMPLETE]
     F -->|fault/interlock| X[FAULT / all OFF]
     G -->|fault/interlock| X
     R -->|missing reject window timeout| X
-    N -->|invalid/missing discharge timing| X
+    N -->|invalid/missing normal timing| X
 ```
 
-The HMI should highlight the active node, active disposition and first blocking interlock.
+The semantic reject-window input exists in the controller model, but the real installed-machine adapter that produces that window is intentionally not frozen until G8.
 
 ---
 
 ## V4 — Interlock Predicates
 
-Purpose: compact review equations only; not a second controller implementation.
+Purpose: compact review equations; not a second controller implementation.
 
 ```text
 AUTO_PERMISSIVE = DI1 & DI2 & DI3 & DI4
 MANUAL_REQUEST  = DI1 & DI4
 BAG_PRESENT     = DI6
-WEIGHT_FRESH    = quality==GOOD && age<=weight_stale_us
+WEIGHT_FRESH    = quality==GOOD && sample_time<=now && age<=weight_stale_us
 CUTOFF_REACHED  = net_kg >= target_kg - cutoff_margin_kg
-
-BROKEN_BAG_CANDIDATE = state in {COARSE_FILL,FINE_FILL}
-                       && weight_fresh
-                       && qualified finite-window loss >= configured trip
-                       && persistence satisfied
-
-REJECT_PUSH_ALLOWED = disposition==REJECT && reject_window
-NORMAL_PUSH_ALLOWED = disposition==GOOD && normal_discharge_due
+FILL_ACTIVE     = state in {COARSE_FILL,FINE_FILL}
 ```
 
-State-derived output rules:
+Current executable broken-bag detector is a **running high-water loss + persistence detector**, not a finite-window derivative:
 
 ```text
-COARSE: DO4+DO5+DO6+DO7+DO8 ON
-FINE:   DO4+DO6+DO7+DO8 ON
-REJECT detector accepted: DO4..DO8 OFF in the same controller decision
-PUSH:   DO3 ON only in AUTO and only after the selected eject path is due
+DETECTOR_ENABLED = broken_bag_loss_trip_kg > 0
+                   && broken_bag_persist_us > 0
+
+on each NEW WeightSnapshot.sequence while FILL_ACTIVE and WEIGHT_FRESH:
+    peak_kg = max(peak_kg, net_kg)
+    loss_kg = peak_kg - net_kg
+
+LOSS_ACTIVE = loss_kg >= broken_bag_loss_trip_kg
+BROKEN_BAG  = LOSS_ACTIVE persists for broken_bag_persist_us
+```
+
+Repeated controller ticks over one unchanged weight sample cannot manufacture persistence evidence.
+
+Routing predicates:
+
+```text
+REJECT_PUSH_ALLOWED = disposition==REJECT && mode==AUTO && reject_window
+NORMAL_PUSH_ALLOWED = disposition==GOOD && mode==AUTO && normal_discharge_due
+```
+
+State-derived rules:
+
+```text
+COARSE: DO1+DO2+DO4+DO5+DO6+DO7+DO8 ON
+FINE:   DO1+DO2+DO4+DO6+DO7+DO8 ON
+REJECT accepted: DO4..DO8 OFF in the same returned controller output image
+PUSH:   DO3 ON only in AUTO after the selected route becomes due
 FAULT:  all outputs safe image
 ```
 
@@ -177,33 +236,44 @@ No Karnaugh map is canonical for this timed sequential machine.
 
 ---
 
-## V5 — Logic Dependency Graph
+## V5 — Logic Dependency / Authority Graph
 
-Purpose: show authority boundaries.
+Purpose: show what may influence real-time outputs and what may only observe them.
 
 ```mermaid
 flowchart LR
     DI[8DI process image] --> P[Permissives / edge detection]
-    TLB[TLB485 WeightSnapshot] --> Q[Freshness / thresholds / broken-bag detector]
-    POS[Position timing adapter] --> R[210 reject window / normal discharge timing]
+    TLB[TLB485 WeightSnapshot] --> Q[Freshness / thresholds / loss detector]
+    POS[Position timing adapter] --> R[reject window / normal discharge timing]
     CLK[Monotonic time] --> TM[Timeouts / persistence / settle]
     P --> FSM[sp01::Controller]
     Q --> FSM
     R --> FSM
     TM --> FSM
     FSM --> O[Desired 8DO image]
-    O --> OWN[Single physical output owner]
-    OWN --> HW[TCA9554 / board output stage]
-    FSM --> E[Events / evidence / HMI snapshot]
+    O --> OWN[Single board-output owner]
+    OWN --> HW[TCA9554 / NPN output stage]
+    FSM --> S[Snapshot / events]
+    S --> COL[Plant collector]
+    COL --> HMI[Local / Cloudflare static FE]
 ```
 
-Network/HMI tasks consume state; they do not own physical process outputs.
+Authority rules:
+
+```text
+Controller + local I/O task   real-time process authority
+Plant collector               read-only aggregation
+Engineering console           supervisory visualization
+Cloud/WAN                     optional; never required for cutoff/interlock/eject timing
+```
+
+The collector exposes GET/SSE only; it does not contain actuator write routes.
 
 ---
 
 ## V6 — Executable Engine / Ground Truth
 
-Canonical executable files:
+Canonical control engine:
 
 ```text
 firmware/esp32-s3/components/controller/include/sp01/model.hpp
@@ -217,22 +287,27 @@ Current executable reject model includes:
 BagDisposition {UNDECIDED, GOOD, REJECT}
 State::RejectWait
 PositionSnapshot.reject_window
-broken-bag finite-window/high-water loss detector
-same-tick transition from fill state to RejectWait
-DO4..DO8 removed by RejectWait output image
-DO3 only when reject_window becomes true
-normal A/B discharge path remains separate for GOOD bags
+running high-water loss detector + new-sample persistence
+same-tick transition from fill state to RejectWait in AUTO
+same-tick transition from fill state to Complete in MANUAL reject
+DO4..DO8 absent from RejectWait/Complete output image
+DO3 only when AUTO route due
+normal A/B discharge timing remains separate for GOOD bags
 ```
 
-The broken-bag detector defaults disabled until measured G4/G8 configuration values are supplied. This prevents invented thresholds from becoming production authority.
+The detector defaults disabled until measured G4/G8 values are supplied. `reject_wait_timeout_us` is likewise part of the all-zero/all-configured commissioning set.
 
-Python/host simulation is conformance/reference only, not production control authority.
+`firmware/esp32-s3/main/app_main.cpp` is the production integration target, but during G2 the branch deliberately compiles a focused commissioning diagnostic (`g2_do_seq.cpp`). That bench artifact must not be mistaken for the production controller engine.
+
+The current production integration does not yet supply a real `PositionSnapshot.reject_window`; the default semantic value remains false until the G8 adapter is frozen.
+
+Host/Python simulation is conformance/reference only, not process authority.
 
 ---
 
 ## V7 — Physical I/O / Terminals
 
-Canonical board map remains `BOARD_TERMINALS.md`.
+Canonical board map: `BOARD_TERMINALS.md`.
 
 ```text
 DI1 hopper.feeder_running
@@ -256,145 +331,197 @@ DO8 spout.aeration
 load cell -> TLB485 -> isolated RS485 -> WeightSnapshot
 ```
 
-Broken-bag detection does not consume an extra DI. Reject and normal ejection both use semantic `DO3 bag.push` at different timing windows.
+Input bench truth now proven on the physical SP01 board:
+
+```text
+passive dry-contact test: DICOM floating, DGND <-> selected DIx
+DI1..DI8: PASS, one expected bit at a time, return to 0xFF, no observed adjacent-bit cross-talk
+```
+
+Current G2 DO test uses the board DI channels as a low-current loopback indicator/load so that each DO may be verified one-hot without connecting machine actuators. This proves switching/selection on the bench, not 24 V production-load current or thermal margin.
+
+The DO stage is NPN open-collector/sinking. Do not describe `DOx` as a +24 V source.
+
+Broken-bag detection consumes no ninth DI. Both automatic eject routes use semantic DO3 at different timing windows.
 
 ---
 
 ## V8 — Exception / Fault / Reject Matrix
 
-Purpose: keep process reject separate from equipment/controller faults.
+Purpose: keep controlled process reject separate from controller/equipment faults.
 
 | Condition | Classification | Immediate result | Later route |
 |---|---|---|---|
-| Qualified weight loss while filling | `REJECT` disposition | DO4..DO8 OFF immediately | push near 210 deg |
-| Healthy fill + stable final weight | `GOOD` disposition | normal cutoff/settle | push near 355 deg |
+| Qualified loss while filling, AUTO | `REJECT` disposition | DO4..DO8 OFF immediately | wait semantic reject window; one DO3 push near 210 deg |
+| Qualified loss while filling, MANUAL | `REJECT` disposition | DO4..DO8 OFF immediately | `COMPLETE`; no automatic DO3 push |
+| Healthy fill + stable final weight, AUTO | `GOOD` disposition | normal cutoff/settle | normal A/B timing; DO3 push near 355 deg |
+| Healthy fill + stable final weight, MANUAL | `GOOD` disposition | normal cutoff/settle | `COMPLETE`; no automatic DO3 push |
 | `PERMISSIVE_LOST` | fault | all OFF | explicit recovery |
 | `BAG_MISSING` / `BAG_LOST` | fault | all OFF | explicit recovery |
 | `WEIGHT_STALE` / `WEIGHT_FAULT` | fault | all OFF | restore weighing |
-| `STATE_TIMEOUT` | fault | all OFF | diagnose timing/process |
+| `STATE_TIMEOUT` | fault | all OFF | diagnose process/timing |
 | `IO_FAULT` | fault | all OFF | diagnose I/O |
-| `DISCHARGE_TIMING_INVALID` | fault | all OFF | diagnose reference/timing |
+| `DISCHARGE_TIMING_INVALID` | fault | all OFF | diagnose A/B timing |
 | `MODE_CHANGED` during active cycle | fault | all OFF | explicit recovery |
 
-Required reject invariants:
+Reject invariants:
 
 ```text
 REJECT cannot silently revert to GOOD in the same cycle
-REJECT never reopens DO4..DO8 before ejection
-REJECT does not later get a normal 355 deg push
-GOOD never gets a 210 deg reject push
+REJECT never reopens DO4..DO8 before cycle completion
+AUTO REJECT does not later receive the GOOD ~355 deg push
+AUTO GOOD does not receive the reject ~210 deg push
+measurement uncertainty/fault is not silently converted into REJECT
 ```
 
 ---
 
 ## V9 — Supervisory State Projection
 
-Purpose: operator-level macro state; not a second FSM.
+Purpose: operator macro state only; never re-implements transition logic.
 
 ```text
-IDLE      WAIT_PERMISSIVE / WAIT_FILL_POSITION
-RUNNING   BAG_ACQUIRE .. SETTLE
-REJECTING REJECT_WAIT / reject PUSH
-DISCHARGE WAIT_DISCHARGE / normal PUSH
-COMPLETE  COMPLETE
-FAULTED   FAULT
+IDLE       WAIT_PERMISSIVE / WAIT_FILL_POSITION
+RUNNING    BAG_ACQUIRE / BAG_VERIFY / TARE_READY / COARSE_FILL / FINE_FILL / CUTOFF / SETTLE
+REJECTING  REJECT_WAIT, and PUSH when disposition==REJECT
+DISCHARGE  WAIT_DISCHARGE, and PUSH when disposition==GOOD
+COMPLETE   COMPLETE
+FAULTED    FAULT
 ```
 
-Do not claim full ISA-88 compliance from this projection.
+Do not classify every `PUSH` as normal discharge; disposition determines whether it is reject or normal ejection.
 
 ---
 
 ## V10 — Communication / Data Contract
 
-Local control contract:
+### Local control path
 
 ```text
 TLB485 -> WeightSnapshot -> Controller
 8DI -> InputImage -> Controller
 position adapter -> PositionSnapshot -> Controller
 Controller -> ControllerSnapshot + desired OutputImage
-single output owner -> physical board DO
+board-output owner -> commanded OutputImage -> TCA9554
 ```
 
-Supervisory telemetry should expose semantic data, not magic register addresses:
+Terminology:
 
 ```text
-identity: spout_id, firmware_sha, config_revision
-control: mode, state, fault, disposition, cycle_id
-I/O: di_bits, desired_do_bits, physical_do_bits when available
-weight: net_kg, quality, stable, sample_time, age, sequence
-reject: detector_enabled, peak_kg, detected_weight_kg, detected_ts, reject_window
-normal timing: ref interval, normal discharge due
-TLB: polls_ok, errors, last_error, latency/jitter when instrumented
-system: uptime, reset_reason, free_heap, minimum_free_heap
-network: link, IP, last_seen
+desired_do    output image requested by the controller FSM
+commanded_do  output image last commanded to the board adapter
+physical_do   independent electrical feedback, only if future hardware actually measures it
 ```
 
-Cloud/central HMI is read/supervisory by default. Any write/service API has separate interlocks and authorization.
+Do not label `commanded_do` as physically proven ON/OFF.
+
+### Current embedded `/api/state`
+
+Current semantic fields include:
+
+```text
+mode, state, fault, disposition, cycle_id
+weight, stable, quality, weight_sequence, weight_sample_time_us
+di, desired_do, commanded_do
+broken_bag_detected_us, broken_bag_peak_kg, broken_bag_weight_kg
+discharge_ref_interval_us, discharge_due_us
+service_ready, bench_do_available
+tlb_polls, tlb_errors, tlb_last_error
+```
+
+### Plant collector
+
+The collector polls spout endpoints, normalizes aliases, adds `schema_version=1`, stores latest snapshots and semantic change events, and exposes read-only:
+
+```text
+GET /healthz
+GET /api/v1/spouts
+GET /api/v1/spouts/{id}
+GET /api/v1/spouts/{id}/events
+GET /api/v1/live        (SSE)
+```
+
+The collector has no POST/write actuator routes.
+
+### Local service plane
+
+The embedded controller may expose separately authorized service operations such as calibration and G2 bench DO pulse when the corresponding build option is enabled. Those are local service functions with token/interlock checks; they are not central/cloud process authority.
+
+Future telemetry may add identity/system/network fields such as firmware SHA, config revision, uptime, reset reason, heap and IP. V11 must show them as unavailable until they are actually published.
 
 ---
 
 ## V11 — Industrial Digital Twin / Web HMI
 
-Purpose: composite browser view for commissioning and maintenance.
+Purpose: one browser composite for commissioning and maintenance, with the other core views as drill-downs.
 
-Recommended top-level screen:
+Canonical top-level layout:
 
 ```text
 +--------------------------------------------------------------------------------+
-| SP01 | MODE | STATE | FAULT | DISPOSITION | CYCLE | FW SHA | LINK             |
+| SP01 | MODE | STATE | FAULT | DISPOSITION | CYCLE | FW SHA? | LINK?           |
 +--------------------------------------+-----------------------------------------+
-| Process schematic                    | Weight / time                           |
-| hopper -> valves -> spout -> bag      | coarse / cutoff / loss detector         |
+| Process / selected route             | Weight / time                           |
+| GOOD ~355 vs REJECT ~210             | measured net kg; no fake dW/dt           |
 +--------------------------------------+-----------------------------------------+
 | State / routing strip                | Interlocks / first blocker              |
-| normal ~355 vs reject ~210           | permissive / bag / weight / position    |
+| current core state highlighted       | permissive / bag / weight / position    |
 +--------------------------------------+-----------------------------------------+
-| DI1..8 / desired+physical DO1..8     | TLB / heap / reset / network            |
+| DI1..8                               | desired DO1..8 / commanded DO1..8       |
 +--------------------------------------+-----------------------------------------+
-| V1 event timeline / fault+reject history / commissioning evidence             |
+| TLB diagnostics / collector age / online state / reset/network if published   |
++--------------------------------------------------------------------------------+
+| V1 event history / fault + reject evidence                                    |
 +--------------------------------------------------------------------------------+
 ```
 
-All 13 views may be rendered in HTML, but V11 is the main composite page; detailed views should be drill-down panels/tabs rather than 13 unrelated applications.
+Truth-state convention for every metric:
 
-Truth rule: never render pseudo-live values. A metric appears live only when runtime telemetry supplies it.
+```text
+MEASURED/REPORTED   value directly supplied by firmware/collector
+DERIVED             deterministic display projection from reported fields
+CONFIGURED          value from an identified configuration source
+UNAVAILABLE         not published / not measured; never replaced by fake data
+```
+
+UI rules:
+
+```text
+V11 is the default composite page
+V1..V10 are drill-down tabs/panels, not separate competing applications
+V12/V13 are extension tabs
+GOOD and REJECT routes are visually distinct
+PUSH is colored/classified using disposition, not state name alone
+desired_do and commanded_do are labeled separately
+physical DO is never inferred from commanded_do
+loss of collector/browser/WAN must not imply loss of local controller authority
+```
+
+Current static engineering console lives at `web/engineering-console/index.html` and consumes the read-only collector REST/SSE API. It must continue to render missing telemetry as unavailable.
 
 ---
 
-## V12 — Weighing Signal Quality / Calibration / Tare
+# Extension V12 — Weighing Signal Quality / Calibration / Tare
 
-Purpose: own the measurement evidence needed by normal cutoff and broken-bag detection.
+Purpose: own measurement evidence needed by cutoff and broken-bag threshold commissioning.
 
-Keep these separate:
+Keep separate:
 
 ```text
 calibration zero/span     TLB/load-cell measurement chain
-cycle tare                runtime process offset if later adopted
-recipe target             production compensation such as 50.0/50.1/50.2 kg
+cycle tare                runtime offset if later adopted
+recipe target             production target/compensation
 ```
 
-G4/G5/G8 must characterize or freeze:
+G4/G5/G8 characterize or freeze TLB filter/profile, update rate, latency/jitter, vibration/noise, stability semantics, loss-noise envelope, detector threshold/persistence and calibration checks.
 
-```text
-TLB filter/profile
-sample/update rate
-latency/jitter
-zero noise and dynamic vibration noise
-stable semantics
-finite-window loss-noise envelope
-broken_bag_loss_trip_kg
-broken_bag_persist_us
-calibration zero / 20 kg check / 50 kg span and verification
-```
-
-Any future cycle tare must be bounded, observable and must not silently rewrite TLB calibration. Adaptive dW/dt/in-flight algorithms are not required for v0.1.
+The current detector is high-water/persistence. A future finite-window/dW/dt method would be a new validated algorithm, not an alternate description of current code.
 
 ---
 
-## V13 — Eight-Spout / Rotating-Stationary Topology
+# Extension V13 — Eight-Spout / Rotating-Stationary Topology
 
-Purpose: whole-machine view.
+Purpose: whole-machine topology.
 
 ```text
 ROTATING
@@ -417,13 +544,11 @@ Rules:
 
 ```text
 no spout controller is master for another spout
-loss of central HMI/cloud must not remove local cutoff/interlock authority
+loss of central HMI/cloud does not own local cutoff/interlock/eject timing
 each event carries spout_id + cycle_id
 central view correlates eight spouts but does not time DO3/DO4..DO8
 slip-ring data dependency is not assumed until as-built evidence requires it
 ```
-
-Cloudflare FE is suitable for static HTML/CSS/JS views; a local mirror of the same FE build is preferred for plant access when WAN is unavailable.
 
 ---
 
@@ -440,7 +565,7 @@ G3   V2 + V3 + V4 + V6 + V8 deterministic dry FSM including GOOD/REJECT paths
 G4   V1 + V10 + V12 TLB transport/noise/detector evidence
 G5   V10 + V12 calibration evidence
 G6   V5 + V10 + V11 prove loss of browser/network does not own local control
-G7   all views reconciled against measured evidence and executable code
+G7   reconcile core V1..V11 plus extensions required by the affected gate
 G8   V1 + V7 + V8 + V11 + V12 + V13 shadow against legacy machine, physical DO isolated
 G9   V1 + V8 + V11 controlled one-spout live pilot with rollback and accepted GOOD/REJECT behavior
 ```
@@ -449,4 +574,13 @@ G9   V1 + V8 + V11 controlled one-spout live pilot with rollback and accepted GO
 
 Software/CI may prove executable behavior and prepare views. It cannot substitute for physical evidence required by G2, G2T, G4, G5, G8 or G9.
 
-Until G8 freezes the installed position method, `PositionSnapshot.reject_window` is a semantic test/adapter boundary, not a claim that a new 210-degree sensor or DI exists.
+As of the current bench sequence:
+
+```text
+G2 sustained USB/Ethernet soak   PASS
+G2 DI1..DI8 physical truth      PASS
+G2 DO physical/loopback truth   ACTIVE
+G2 reset/restart safe outputs   PENDING
+```
+
+Until G8 freezes the installed position method, `PositionSnapshot.reject_window` is a semantic adapter boundary, not a claim that a new 210-degree sensor or ninth DI exists.
