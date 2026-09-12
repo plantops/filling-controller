@@ -23,11 +23,14 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 
-# W5500 SPI Ethernet support, used by the G1 SPI/link stages.
+# W5500 SPI Ethernet support.
 CONFIG_ETH_USE_SPI_ETHERNET=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
 
-# Bench-only virtual I/O with web UI. Physical outputs stay in the safe state.
-# Never enable on a machine-connected node.
-CONFIG_SP01_VIRTUAL_IO=y
+# Fast field-prototype profile until the physical TLB485 arrives:
+# real DI + Ethernet/HMI + dummy WeightSnapshot, with normal process DO held OFF.
+# CONFIG_SP01_TLB_ENABLE is not set
+CONFIG_SP01_DUMMY_WEIGHT_ENABLE=y
+# CONFIG_SP01_BENCH_DO_TEST_ENABLE is not set
+# CONFIG_SP01_VIRTUAL_IO is not set
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
