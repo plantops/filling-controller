@@ -24,11 +24,17 @@ sp01::BoardIo* g_io = nullptr;
 sp01::Tlb485* g_tlb = nullptr;
 portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 sp01::InputImage g_inputs{};
+sp01::WeightSnapshot g_weight_snapshot{};
 sp01::ControllerSnapshot g_controller_snapshot{};
 sp01::OutputImage g_commanded_outputs{};
 sp01::ControllerConfig g_controller_config{};
 std::uint8_t g_bench_do_channel = 0;
 std::uint64_t g_bench_do_until_us = 0;
+
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+float g_dummy_weight_kg = 0.0F;
+std::uint32_t g_dummy_weight_sequence = 0;
+#endif
 
 sp01::ControllerConfig make_controller_config() noexcept {
     sp01::ControllerConfig c{};
@@ -78,7 +84,7 @@ void log_build_and_config_identity() noexcept {
     ESP_LOGI(kTag,
              "config control_ms=%d target_g=%d coarse_to_fine_g=%d cutoff_margin_g=%d weight_stale_ms=%d "
              "broken_loss_g=%d broken_persist_ms=%d reject_timeout_ms=%d discharge_counts=%d discharge_lead=%d "
-             "di_invert=0x%02x do_invert=0x%02x tlb_enable=%d tlb_baud=%d tlb_slave=%d tlb_poll_ms=%d",
+             "di_invert=0x%02x do_invert=0x%02x tlb_enable=%d dummy_weight=%d tlb_baud=%d tlb_slave=%d tlb_poll_ms=%d",
              CONFIG_SP01_CONTROL_PERIOD_MS, CONFIG_SP01_TARGET_G, CONFIG_SP01_COARSE_TO_FINE_G,
              CONFIG_SP01_CUTOFF_MARGIN_G, CONFIG_SP01_WEIGHT_STALE_MS,
              CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G, CONFIG_SP01_BROKEN_BAG_PERSIST_MS,
@@ -89,7 +95,80 @@ void log_build_and_config_identity() noexcept {
 #else
              0,
 #endif
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+             1,
+#else
+             0,
+#endif
              CONFIG_SP01_TLB_BAUD, CONFIG_SP01_TLB_SLAVE, CONFIG_SP01_TLB_POLL_MS);
+}
+
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+sp01::WeightSnapshot dummy_weight(std::uint64_t now_us, sp01::State state) noexcept {
+    constexpr float kCoarseStepKg = 0.20F;
+    constexpr float kFineStepKg = 0.05F;
+
+    bool stable = true;
+    switch (state) {
+        case sp01::State::WaitPermissive:
+        case sp01::State::WaitFillPosition:
+        case sp01::State::BagAcquire:
+        case sp01::State::BagVerify:
+        case sp01::State::TareReady:
+            g_dummy_weight_kg = 0.0F;
+            break;
+
+        case sp01::State::CoarseFill:
+            stable = false;
+            g_dummy_weight_kg += kCoarseStepKg;
+            if (g_dummy_weight_kg > g_controller_config.coarse_to_fine_kg) {
+                g_dummy_weight_kg = g_controller_config.coarse_to_fine_kg;
+            }
+            break;
+
+        case sp01::State::FineFill:
+            stable = false;
+            g_dummy_weight_kg += kFineStepKg;
+            if (g_dummy_weight_kg > g_controller_config.target_kg) {
+                g_dummy_weight_kg = g_controller_config.target_kg;
+            }
+            break;
+
+        case sp01::State::Cutoff:
+            stable = false;
+            if (g_dummy_weight_kg < g_controller_config.target_kg) {
+                g_dummy_weight_kg = g_controller_config.target_kg;
+            }
+            break;
+
+        case sp01::State::Settle:
+        case sp01::State::RejectWait:
+        case sp01::State::WaitDischarge:
+        case sp01::State::Push:
+        case sp01::State::Complete:
+        case sp01::State::Fault:
+            break;
+    }
+
+    sp01::WeightSnapshot w{};
+    w.net_kg = g_dummy_weight_kg;
+    w.sample_time_us = now_us;
+    w.sequence = ++g_dummy_weight_sequence;
+    w.quality = sp01::WeightQuality::Good;
+    w.stable = stable;
+    return w;
+}
+#endif
+
+sp01::WeightSnapshot current_weight(std::uint64_t now_us) noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    return dummy_weight(now_us, g_controller->snapshot().state);
+#elif CONFIG_SP01_TLB_ENABLE
+    return g_tlb->snapshot();
+#else
+    (void)now_us;
+    return {};
+#endif
 }
 
 bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
@@ -102,11 +181,15 @@ bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
     if (!g_controller || !g_tlb) return false;
     portENTER_CRITICAL(&g_status_mux);
     out.inputs = g_inputs;
+    out.weight = g_weight_snapshot;
     out.controller = g_controller_snapshot;
     out.commanded_outputs = g_commanded_outputs;
     portEXIT_CRITICAL(&g_status_mux);
-    out.weight = g_tlb->snapshot();
+#if CONFIG_SP01_TLB_ENABLE
     out.tlb = g_tlb->diagnostics();
+#else
+    out.tlb = {};
+#endif
 
     const bool machine_stopped = !sp01::input(out.inputs, sp01::Di::MachineMotorRunning);
     const bool fill_switch_off = !sp01::input(out.inputs, sp01::Di::ProcessInitiative);
@@ -124,13 +207,22 @@ bool service_ready() noexcept {
 }
 
 esp_err_t hmi_cal_zero() noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
     return g_tlb->calibration_zero();
+#endif
 }
 
 esp_err_t hmi_cal_span(float kg) noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    (void)kg;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
     return g_tlb->calibration_span(kg);
+#endif
 }
 
 esp_err_t hmi_bench_do_pulse(std::uint8_t channel, std::uint32_t pulse_ms) noexcept {
@@ -185,6 +277,7 @@ void control_task(void*) {
         esp_err_t io_err = g_io->read_inputs(inputs);
         sp01::ControllerSnapshot snapshot{};
         sp01::OutputImage commanded_outputs{};
+        sp01::WeightSnapshot weight{};
 
         if (io_err != ESP_OK) {
             g_controller->force_fault(sp01::Fault::IoFault, now);
@@ -196,15 +289,16 @@ void control_task(void*) {
                               ? sp01::OperationMode::Auto
                               : sp01::OperationMode::Manual;
 
-            const auto weight = g_tlb->snapshot();
+            weight = current_weight(now);
             snapshot = g_controller->tick(now, inputs, weight);
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // G2 bench artifact is deliberately non-operational: normal process
-            // outputs are suppressed. Only one explicit HMI-requested DO may pulse,
-            // and it automatically returns to all-off after <= 1 second.
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Prototype/shadow modes never apply normal process outputs to the board.
             physical_outputs = sp01::safe_output_image();
+#endif
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Optional disconnected-bench one-hot pulse path.
             std::uint8_t bench_channel = 0;
             std::uint64_t bench_until = 0;
             portENTER_CRITICAL(&g_status_mux);
@@ -232,6 +326,7 @@ void control_task(void*) {
 
         portENTER_CRITICAL(&g_status_mux);
         g_inputs = inputs;
+        g_weight_snapshot = weight;
         g_controller_snapshot = snapshot;
         g_commanded_outputs = commanded_outputs;
         portEXIT_CRITICAL(&g_status_mux);
@@ -270,8 +365,11 @@ extern "C" void app_main(void) {
     if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) {
         ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
     }
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    ESP_LOGW(kTag, "FIELD PROTOTYPE SHADOW: dummy weight active; normal process DO suppressed");
+#endif
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-    ESP_LOGW(kTag, "G2 BENCH BUILD: normal process outputs suppressed; HMI one-hot DO pulse only");
+    ESP_LOGW(kTag, "G2 BENCH MODE: normal process outputs suppressed; HMI one-hot DO pulse only");
 #endif
     ESP_ERROR_CHECK(io.init(static_cast<std::uint8_t>(CONFIG_SP01_DI_INVERT_MASK),
                             static_cast<std::uint8_t>(CONFIG_SP01_DO_INVERT_MASK)));
@@ -290,6 +388,7 @@ extern "C" void app_main(void) {
 #endif
 
     portENTER_CRITICAL(&g_status_mux);
+    g_weight_snapshot = current_weight(static_cast<std::uint64_t>(esp_timer_get_time()));
     g_controller_snapshot = controller.snapshot();
     g_commanded_outputs = io.last_commanded_outputs();
     portEXIT_CRITICAL(&g_status_mux);
@@ -299,9 +398,6 @@ extern "C" void app_main(void) {
     xTaskCreatePinnedToCore(weighing_task, "sp01_tlb", 4096, nullptr, 10, nullptr, 0);
 #endif
 
-    // ESP-IDF's W5500 interrupt mode requires the GPIO ISR service to exist
-    // before the Ethernet driver registers the IRQ handler. The previous G2
-    // build omitted this, so W5500 could fail before DHCP ever started.
     const esp_err_t gpio_isr_err = gpio_install_isr_service(0);
     if (gpio_isr_err != ESP_OK && gpio_isr_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(kTag, "GPIO ISR service init failed: %s", esp_err_to_name(gpio_isr_err));
