@@ -6,18 +6,23 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
 #include <cinttypes>
+#include <cstdio>
 
 namespace {
 
 constexpr char kTag[] = "sp01";
+constexpr char kFieldApSsid[] = "SP01-HMI";
+constexpr char kFieldApPassword[] = "sp01filling";
 
 sp01::Controller* g_controller = nullptr;
 sp01::BoardIo* g_io = nullptr;
@@ -343,6 +348,49 @@ void control_task(void*) {
     }
 }
 
+void start_field_hotspot_if_needed() noexcept {
+    if (CONFIG_SP01_WIFI_SSID[0] != '\0') {
+        ESP_LOGI(kTag, "Field hotspot skipped: configured Wi-Fi STA is enabled");
+        return;
+    }
+
+    esp_netif_t* ap_netif = esp_netif_create_default_wifi_ap();
+    if (!ap_netif) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: AP netif create failed");
+        return;
+    }
+    (void)esp_netif_set_hostname(ap_netif, "sp01-ap");
+
+    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t err = esp_wifi_init(&init);
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: Wi-Fi init failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    wifi_config_t ap{};
+    std::snprintf(reinterpret_cast<char*>(ap.ap.ssid), sizeof(ap.ap.ssid), "%s", kFieldApSsid);
+    std::snprintf(reinterpret_cast<char*>(ap.ap.password), sizeof(ap.ap.password), "%s", kFieldApPassword);
+    ap.ap.channel = 1;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+
+    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_AP, &ap);
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_netif_ip_info_t ip{};
+    if (esp_netif_get_ip_info(ap_netif, &ip) == ESP_OK) {
+        ESP_LOGI(kTag, "FIELD HOTSPOT READY: SSID=%s HMI=http://" IPSTR, kFieldApSsid, IP2STR(&ip.ip));
+    } else {
+        ESP_LOGI(kTag, "FIELD HOTSPOT READY: SSID=%s HMI=http://192.168.4.1", kFieldApSsid);
+    }
+}
+
 }  // namespace
 
 extern "C" void app_main(void) {
@@ -414,5 +462,9 @@ extern "C" void app_main(void) {
 #endif
     const esp_err_t web_err = sp01::web_hmi_start(web, fill_hmi_snapshot, hmi_cal_zero, hmi_cal_span,
                                                   hmi_bench_do_pulse, hmi_bench_do_off);
-    if (web_err != ESP_OK) ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
+    if (web_err != ESP_OK) {
+        ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
+    } else {
+        start_field_hotspot_if_needed();
+    }
 }
