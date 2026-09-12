@@ -111,6 +111,15 @@ config SP01_TLB_ENABLE
     bool "Enable TLB485 polling"
     default y
 
+config SP01_DUMMY_WEIGHT_ENABLE
+    bool "Use dummy WeightSnapshot source (prototype shadow only)"
+    default n
+    help
+        Temporary field-prototype source when the TLB485 is not yet available.
+        It injects a simple 0 -> coarse -> fine -> target weight trajectory at
+        the WeightSnapshot boundary. While enabled, normal process outputs are
+        forced safe OFF. This does not replace G4/G5 real TLB/calibration work.
+
 config SP01_TLB_BAUD
     int "TLB485 baud"
     default 9600
