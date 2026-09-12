@@ -7,21 +7,20 @@
 // Bench wiring for this test only:
 //   INPUT DICOM   : floating
 //   OUTPUT DOCOM  : floating (no inductive load in this loopback)
-//   INPUT DGND --- OUTPUT GND
-//   DO1 --------- DI1
-//   DO2 --------- DI2
-//   ...
-//   DO8 --------- DI8
+//   INPUT DGND --- OUTPUT GND   (fixed common jumper/wire)
+//   one movable jumper:
+//       DO1 --- DI1, then DO2 --- DI2, ... DO8 --- DI8
 //
-// With all outputs OFF the DI raw byte must be 0xFF. When DOx turns ON, the
-// NPN/open-collector output sinks the corresponding dry-contact DI input, so
+// With all outputs OFF the selected DI must remain high. When DOx turns ON,
+// the NPN/open-collector output sinks the matching dry-contact DI input, so
 // exactly that DI bit must go low and its DI LED should light.
 //
 // Sequence after boot:
 //   - all outputs OFF for 10 s (safe-start/reset observation window)
-//   - one sweep DO1..DO8, 500 ms per channel
-//   - each ON/OFF is physically checked through the matching DI
-//   - after the sweep all outputs stay OFF; press RESET to repeat
+//   - for each channel, 5 s preparation window with ALL outputs OFF
+//   - operator moves the single jumper to DOx <-> DIx during that window
+//   - firmware checks OFF baseline, turns DOx ON for 1.5 s, checks DIx, then OFF
+//   - after DO8 all outputs stay OFF; press RESET to repeat
 
 #include <cstdint>
 
@@ -47,9 +46,11 @@ constexpr gpio_num_t kDiPins[8] = {
 };
 
 constexpr TickType_t kBootSafeMs = pdMS_TO_TICKS(10000);
-constexpr TickType_t kSettleMs = pdMS_TO_TICKS(100);
-constexpr TickType_t kOnRemainMs = pdMS_TO_TICKS(400);
-constexpr TickType_t kOffGapMs = pdMS_TO_TICKS(1000);
+constexpr TickType_t kPrepareStepMs = pdMS_TO_TICKS(1000);
+constexpr int kPrepareSeconds = 5;
+constexpr TickType_t kSettleMs = pdMS_TO_TICKS(200);
+constexpr TickType_t kOnRemainMs = pdMS_TO_TICKS(1300);  // 1.5 s total ON incl. settle
+constexpr TickType_t kAfterOffMs = pdMS_TO_TICKS(800);
 
 const char* const kDoNames[8] = {
     "scanner.down",
@@ -98,7 +99,6 @@ void init_outputs_safe() {
     err = i2c_master_bus_add_device(g_bus, &dev_cfg, &g_tca);
     if (err != ESP_OK) halt("TCA9554 add", err);
 
-    // Preload all-OFF before enabling TCA9554 pins as outputs.
     write_outputs(0x00);
     const std::uint8_t cfg[2] = {kTcaRegConfig, 0x00};
     err = i2c_master_transmit(g_tca, cfg, sizeof(cfg), 100);
@@ -127,17 +127,25 @@ std::uint8_t read_di_raw() {
     return bits;
 }
 
+void preparation_window(int channel) {
+    write_outputs(0x00);
+    ESP_LOGI(kTag, "MOVE JUMPER NOW: DO%d <-> DI%d; all outputs remain OFF", channel, channel);
+    for (int s = kPrepareSeconds; s > 0; --s) {
+        ESP_LOGI(kTag, "DO%d test starts in %d s", channel, s);
+        vTaskDelay(kPrepareStepMs);
+    }
+}
+
 }  // namespace
 
 extern "C" void app_main(void) {
     ESP_LOGI(kTag, "================================================");
-    ESP_LOGI(kTag, "SP01 G2 DO->DI LOOPBACK TEST");
+    ESP_LOGI(kTag, "SP01 G2 DO->DI SINGLE-JUMPER TEST");
     ESP_LOGI(kTag, "MACHINE ACTUATORS MUST BE DISCONNECTED");
-    ESP_LOGI(kTag, "USB power only is sufficient for this low-current loopback");
     ESP_LOGI(kTag, "INPUT DICOM floating; OUTPUT DOCOM floating");
-    ESP_LOGI(kTag, "wire INPUT DGND <-> OUTPUT GND");
-    ESP_LOGI(kTag, "wire DO1->DI1 ... DO8->DI8");
-    ESP_LOGI(kTag, "10 s ALL OFF, then one 500 ms one-hot sweep");
+    ESP_LOGI(kTag, "KEEP INPUT DGND <-> OUTPUT GND CONNECTED");
+    ESP_LOGI(kTag, "Use ONE movable jumper: DOx <-> DIx");
+    ESP_LOGI(kTag, "10 s ALL OFF, then 5 s setup window per channel");
     ESP_LOGI(kTag, "================================================");
 
     init_outputs_safe();
@@ -150,16 +158,18 @@ extern "C" void app_main(void) {
     std::uint8_t pass_mask = 0;
     std::uint8_t fail_mask = 0;
 
-    const std::uint8_t before = read_di_raw();
-    if (before != 0xFF) {
-        ESP_LOGE(kTag, "BASELINE FAIL: expected DIraw=0xff with all DO OFF, got 0x%02x", before);
-    } else {
-        ESP_LOGI(kTag, "BASELINE PASS: all DO OFF -> DIraw=0xff");
-    }
-
     for (int i = 0; i < 8; ++i) {
+        const int channel = i + 1;
         const std::uint8_t bit = static_cast<std::uint8_t>(1U << i);
         const std::uint8_t expected_on = static_cast<std::uint8_t>(0xFFU & ~bit);
+
+        preparation_window(channel);
+
+        const std::uint8_t before = read_di_raw();
+        const bool baseline_ok = before == 0xFF;
+        ESP_LOGI(kTag,
+                 "DO%d %-20s READY/OFF DIraw=0x%02x expected=0xff %s",
+                 channel, kDoNames[i], before, baseline_ok ? "PASS" : "FAIL");
 
         write_outputs(bit);
         vTaskDelay(kSettleMs);
@@ -167,7 +177,7 @@ extern "C" void app_main(void) {
         const bool on_ok = on_raw == expected_on;
         ESP_LOGI(kTag,
                  "DO%d %-20s ON  bits=0x%02x DIraw=0x%02x expected=0x%02x %s",
-                 i + 1, kDoNames[i], bit, on_raw, expected_on,
+                 channel, kDoNames[i], bit, on_raw, expected_on,
                  on_ok ? "PASS" : "FAIL");
         vTaskDelay(kOnRemainMs);
 
@@ -177,24 +187,24 @@ extern "C" void app_main(void) {
         const bool off_ok = off_raw == 0xFF;
         ESP_LOGI(kTag,
                  "DO%d %-20s OFF bits=0x00 DIraw=0x%02x expected=0xff %s",
-                 i + 1, kDoNames[i], off_raw, off_ok ? "PASS" : "FAIL");
+                 channel, kDoNames[i], off_raw, off_ok ? "PASS" : "FAIL");
 
-        if (on_ok && off_ok) {
+        if (baseline_ok && on_ok && off_ok) {
             pass_mask |= bit;
         } else {
             fail_mask |= bit;
         }
-        vTaskDelay(kOffGapMs);
+        vTaskDelay(kAfterOffMs);
     }
 
     write_outputs(0x00);
     const std::uint8_t final_raw = read_di_raw();
     ESP_LOGI(kTag, "================================================");
-    ESP_LOGI(kTag, "G2 DO LOOPBACK SUMMARY pass_mask=0x%02x fail_mask=0x%02x final_DIraw=0x%02x",
+    ESP_LOGI(kTag, "G2 DO SINGLE-JUMPER SUMMARY pass_mask=0x%02x fail_mask=0x%02x final_DIraw=0x%02x",
              pass_mask, fail_mask, final_raw);
     ESP_LOGI(kTag, "%s", (pass_mask == 0xFF && fail_mask == 0 && final_raw == 0xFF)
-                              ? "G2 DO LOOPBACK VERDICT: PASS"
-                              : "G2 DO LOOPBACK VERDICT: NOT PASS");
+                              ? "G2 DO SINGLE-JUMPER VERDICT: PASS"
+                              : "G2 DO SINGLE-JUMPER VERDICT: NOT PASS");
     ESP_LOGI(kTag, "ALL OUTPUTS HELD OFF. Press RESET to repeat.");
     ESP_LOGI(kTag, "================================================");
 
