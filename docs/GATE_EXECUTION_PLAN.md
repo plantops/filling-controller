@@ -16,7 +16,7 @@ Machine actuators remain disconnected until G8 shadow is complete and G9 live co
 |---|---|---|---|
 | G0 | Build | PASS | host tests + ESP32-S3 build |
 | G1 | Safe board bring-up | PASS | boot, 16 MB flash, TCA9554 safe, DI idle, W5500 SPI/link/DHCP, stable capture |
-| G2 | Physical dummy I/O + Ethernet | ACTIVE | 1 h soak PASS; DI1..8 PASS; DO1..8 physical/loopback + reset-safe output evidence still required |
+| G2 | Physical dummy I/O + Ethernet | PASS WITH OPERATOR WAIVER | 1 h soak PASS; DI1..8 PASS; partial physical output-stage switching evidence retained; exhaustive DO1..8 mapping and separate G2 reset-safe capture explicitly waived by project owner/operator |
 | G2T | Thermal/serviceability | BLOCKED-HW | measured installation temp, elevated-temp soak, reset/fault safe outputs, spare swap/config recovery |
 | G3 | Dry FSM/process logic | PASS | deterministic C++ AUTO/MANUAL + fault matrix + GOOD/~355 and REJECT/~210 software routes |
 | G4 | TLB485 dynamic weighing | BLOCKED-HW | kg/status, update rate, latency/jitter, filter/noise envelope, stale/disconnect/reconnect, switching-noise trial |
@@ -26,8 +26,11 @@ Machine actuators remain disconnected until G8 shadow is complete and G9 live co
 | G8 | Machine shadow | BLOCKED-HW | real DI + TLB, new DO isolated, legacy-vs-SP01 timeline for GOOD and REJECT, red-team R2 |
 | G9 | One-spout live pilot | BLOCKED-HW | controlled DO connection, rollback/spare ready, local acceptance of GOOD and REJECT paths |
 
-G2 evidence: `evidence/SP01/2026-09-10/G2/RESULT.md`.
+G2 baseline evidence: `evidence/SP01/2026-09-10/G2/RESULT.md`.
+G2 reduced-rigor acceptance: `evidence/SP01/2026-09-12/G2/OPERATOR_WAIVER.md`.
 G3 evidence: `evidence/SP01/2026-09-10/G3/SOFTWARE_RESULT.md`.
+
+The G2 waiver is a documented scope decision. It does not claim measurements that were not completed. Any unexplained output behavior during later commissioning reopens the relevant hardware check.
 
 ## Canonical view ownership
 
@@ -80,30 +83,28 @@ healthy AUTO bag:
 
 Detector threshold/persistence and real 210/355 timing/lead are not frozen by G3. They belong to G4/G8.
 
-## G2 — physical dummy I/O
+## G2 — physical dummy I/O — PASS WITH OPERATOR WAIVER
 
 Machine wiring remains disconnected.
 
-Completed:
+Completed evidence:
 
 ```text
 1 h heartbeat/network soak          PASS
 DI1..DI8 dry-contact truth          PASS
+physical output stage switching     OBSERVED PARTIALLY
 ```
 
-Active / remaining:
+Project owner/operator accepted the available G2 evidence for progression and explicitly waived:
 
 ```text
-DO1..DO8 one at a time using approved bench loopback/dummy load
-    OFF -> pulse ON -> automatic OFF
-    correct one-hot channel
-    no adjacent output
-reset/restart -> all physical outputs safe OFF
+exhaustive one-by-one DO1..DO8 loopback proof
+separate reset-safe timing capture dedicated only to G2
 ```
 
-Current bench method may use the board DI input stage/LED as a low-current loopback indicator. That closes switching/channel-selection evidence only; it does not prove 24 V production-load current or thermal margin.
+This waiver is recorded in `evidence/SP01/2026-09-12/G2/OPERATOR_WAIVER.md` and is not equivalent to a fabricated per-channel hardware PASS.
 
-PCB LEDs alone, without a verified electrical loopback/path, are not sufficient physical proof.
+Production actuator wiring remains disconnected. G8/G9 still require actual machine-channel mapping, safe behavior, and commanded-output correctness before live authority.
 
 ## G2T — thermal/serviceability
 
@@ -303,7 +304,7 @@ Every physical result records firmware SHA, board/spout ID, setup, measurements/
 
 ```text
 software: G3 PASS; core 11-view pack + V12/V13 extensions reconciled for current known evidence
-physical: G2 DO/reset -> G2T -> G4 -> G5 -> G6 -> G7 -> G8 -> G9
-          ^
-          next true commissioning blocker
+physical: G2 PASS-WAIVER -> G2T -> G4 -> G5 -> G6 -> G7 -> G8 -> G9
+                            ^
+                            next true commissioning blocker
 ```
