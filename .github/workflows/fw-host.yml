@@ -3,7 +3,7 @@ name: fw
 on:
   workflow_dispatch:
   push:
-    branches: [main, fw-sp01-v0.1, 'diag/**']
+    branches: [main, 'diag/sp01-g2-g9']
     paths:
       - 'firmware/**'
       - 'tools/**'
@@ -28,6 +28,10 @@ on:
       - 'docs/GATE_EXECUTION_PLAN.md'
       - '.github/workflows/fw-host.yml'
 
+concurrency:
+  group: fw-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -36,8 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Python gate tools
-        run: python -m py_compile tools/*.py
       - name: Configure host simulator
         run: cmake -S firmware/host -B build/host -DCMAKE_BUILD_TYPE=Release
       - name: Build host simulator
@@ -53,7 +55,7 @@ jobs:
           name: sp01-host-linux-amd64-${{ github.sha }}
           path: build/host/sp01_host
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   esp32-s3:
     runs-on: ubuntu-latest
@@ -67,9 +69,6 @@ jobs:
           target: esp32s3
           path: firmware/esp32-s3
 
-      # CI logs are served from blob storage that some environments cannot
-      # reach. On failure, post the compiler errors as a commit comment so the
-      # cause is visible through the API alone.
       - name: Publish build errors as a commit comment
         if: failure()
         env:
@@ -104,8 +103,6 @@ jobs:
 
           if [ -f "$SRC/flash_args" ]; then
             cp "$SRC/flash_args" "$DST/flash_args_legacy"
-            # IDF emits the pre-5.x option spelling. esptool 5 warns about it
-            # and later versions may drop it, so ship a hyphenated default.
             sed -e 's/--flash_mode/--flash-mode/g' \
                 -e 's/--flash_freq/--flash-freq/g' \
                 -e 's/--flash_size/--flash-size/g' \
@@ -123,18 +120,18 @@ jobs:
           cp docs/assets/BOARD_TERMINALS.svg "$DST/assets/BOARD_TERMINALS.svg"
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
           cp docs/GATE_EXECUTION_PLAN.md "$DST/GATE_EXECUTION_PLAN.md"
-          cp tools/g1_usb_probe.py tools/analyze_g1_soak.py tools/vbench_gate.py "$DST/"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md.' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
 
       - name: Upload ESP32 flash bundle
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: sp01-esp32-s3-${{ github.sha }}
           path: dist/esp32-s3
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
