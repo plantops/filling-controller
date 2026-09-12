@@ -121,8 +121,10 @@ jobs:
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
           cp docs/GATE_EXECUTION_PLAN.md "$DST/GATE_EXECUTION_PLAN.md"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
+          printf '%s\n' 'SP01 FIELD PROTOTYPE SHADOW' > "$DST/PROTOTYPE_MODE.txt"
+          printf '%s\n' 'Dummy WeightSnapshot enabled; normal process DO held safe OFF; real TLB485 deferred.' >> "$DST/PROTOTYPE_MODE.txt"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'FAST FLASH: PowerShell -> .\flash.ps1 (auto-detects COM3/single serial port).' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
@@ -131,7 +133,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: sp01-esp32-s3-${{ github.sha }}
+          name: sp01-field-prototype
           path: dist/esp32-s3
           if-no-files-found: error
           retention-days: 14
