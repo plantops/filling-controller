@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "g2_do_seq.cpp"
+    SRCS "app_main.cpp"
     INCLUDE_DIRS "."
-    REQUIRES driver
+    REQUIRES controller board_io tlb485 web_hmi esp_timer esp_system esp_driver_gpio
 )
