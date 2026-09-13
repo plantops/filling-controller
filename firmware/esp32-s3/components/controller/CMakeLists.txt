@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "controller.cpp"
+    SRCS "controller.cpp" "controller_explain.cpp"
     INCLUDE_DIRS "include"
 )
