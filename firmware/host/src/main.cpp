@@ -15,7 +15,7 @@ int main() {
     io.set_input(sp01::Di::ProcessInitiative, true);
     weigher.publish(0.0F, true, sp01::WeightQuality::Good, clock.now_us());
 
-    auto s = controller.tick(clock.now_us(), io.read_inputs(), weigher.latest());
+    auto s = controller.tick(clock.now_us(), io.read_inputs(), weigher.latest(), sp01::PositionSnapshot{});
     std::cout << "SP01 host: state=" << sp01::state_name(s.state)
               << " safe=" << (sp01::all_outputs_off(s.outputs) ? "yes" : "no") << '\n';
     return 0;
