@@ -26,10 +26,8 @@ private:
     ControllerSnapshot snapshot_{};
 
     bool fill_position_armed_{false};
-    bool discharge_ref_a_seen_{false};
-    bool prev_discharge_ref_a_{false};
-    bool prev_discharge_ref_b_{false};
-    std::uint64_t discharge_ref_a_us_{0};
+    float prev_angle_deg_{0.0F};
+    bool have_prev_angle_{false};
 
     bool broken_bag_tracking_{false};
     float broken_bag_peak_kg_{0.0F};
@@ -38,8 +36,9 @@ private:
 
     void transition(State next, std::uint64_t now_us) noexcept;
     void fault(Fault code, std::uint64_t now_us) noexcept;
-    void reset_discharge_capture(const InputImage& inputs) noexcept;
-    void update_discharge_capture(std::uint64_t now_us, const InputImage& inputs) noexcept;
+    void reset_discharge_capture() noexcept;
+    // True on the tick where the shaft crosses target_deg going forward.
+    bool angle_crossed(float target_deg, const PositionSnapshot& pos) noexcept;
     void reset_broken_bag_tracking() noexcept;
     [[nodiscard]] bool broken_bag_detected(std::uint64_t now_us,
                                            const WeightSnapshot& weight) noexcept;
