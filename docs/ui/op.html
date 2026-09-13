@@ -44,6 +44,13 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
   gap:12px;flex-wrap:wrap}
 .cap-l{font-size:12px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink3)}
+.tgtbadge{display:inline-flex;align-items:baseline;gap:6px;margin-left:12px;
+  padding:4px 10px;border:1px solid var(--line);border-radius:99px;
+  font-size:13px;font-weight:600;color:var(--ink2);text-transform:none;
+  letter-spacing:0;vertical-align:middle}
+.tgtbadge b{font-size:15px;color:var(--ink)}
+.dev{font-weight:700}
+.dev.over{color:var(--warn)} .dev.under{color:var(--warn)}
 .kg{font-size:clamp(58px,15vw,112px);font-weight:700;line-height:.95;
   letter-spacing:-.03em;margin:10px 0 0}
 .kg .u{font-size:.32em;font-weight:600;color:var(--ink3);margin-left:.16em;
@@ -152,7 +159,7 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
 
   <div class="hero">
     <div class="cap">
-      <span class="cap-l" id="heroCap">Bao vừa đổ</span>
+      <span><span class="cap-l" id="heroCap">Bao vừa đổ</span><span class="tgtbadge" id="tgtBadge"><span id="tgtLbl">Đặt</span><b id="tgtVal">—</b></span></span>
       <div class="seg">
         <button id="bLatch" class="on" onclick="setWeightMode('latched')"
           data-t="latched">Số chốt</button>
@@ -219,14 +226,16 @@ const T={
   target:'Khối lượng đặt',heroLatch:'Bao vừa đổ',heroLive:'Đang cân',
   live:'Số đang cân',offline:'MẤT KẾT NỐI',online:'Trực tuyến',
   waiting:'Chưa có bao nào hoàn tất',blocked:'Máy đang chờ',
+  set:'Đặt',dev:'lệch',at:'lúc',
   fault:'Lỗi',fix:'Xử lý: kiểm tra các mục trên, sau đó máy tự tiếp tục.',
   shiftOf:s=>'Ca '+s+' · đổi ca 0h / 8h / 16h',dayOf:'Tính từ 0h hôm nay',
   tonsNote:'Cộng dồn trong ca'},
  en:{machine:'Machine · Spout',latched:'Latched',live:'Live',
   shift:'Bags this shift',day:'Bags today',tons:'Tonnes this shift',
-  target:'Target weight',heroLatch:'Last bag discharged',heroLive:'Weighing now',
+  target:'Target weight',heroLatch:'Last bag',heroLive:'Weighing now',
   offline:'OFFLINE',online:'Online',
   waiting:'No completed bag yet',blocked:'Machine waiting',
+  set:'Target',dev:'dev',at:'at',
   fault:'Fault',fix:'Action: clear the items above, then the machine resumes.',
   shiftOf:s=>'Shift '+s+' · changes at 00:00 / 08:00 / 16:00',
   dayOf:'Since midnight',tonsNote:'Accumulated this shift'}
@@ -317,13 +326,27 @@ function render(s){
  heroCap.textContent = live ? t.heroLive : t.heroLatch;
  const val = live ? s.weight_kg : s.last_bag_kg;
  kg.classList.toggle('live',live);
+
+ // Target always visible beside the weight, in both modes.
+ tgtLbl.textContent = t.set;
+ tgtVal.textContent = s.target_kg ? s.target_kg.toFixed(1)+' kg' : '—';
+
  if(val===null||val===undefined){
    kg.innerHTML='—<span class="u">kg</span>'; kgSub.textContent=t.waiting;
  }else{
    kg.innerHTML=val.toFixed(2)+'<span class="u">kg</span>';
-   kgSub.textContent = live
-     ? (s.target_kg?('→ '+s.target_kg.toFixed(1)+' kg'):'')
-     : (s.last_bag_time||'');
+   if(live){
+     const togo = (s.target_kg||0)-val;
+     kgSub.textContent = s.target_kg
+       ? (togo>0 ? '→ '+togo.toFixed(2)+' kg' : '') : '';
+   }else{
+     const d=(s.target_kg? val-s.target_kg : null);
+     const dt = d===null ? '' :
+       t.dev+' '+(d>=0?'+':'')+d.toFixed(2)+' kg';
+     kgSub.innerHTML = (s.last_bag_time? t.at+' '+s.last_bag_time+' · ':'')+
+       (d===null?'':'<span class="dev '+(Math.abs(d)>0.3?(d>0?'over':'under'):'')+
+        '">'+dt+'</span>');
+   }
  }
 
  shift.textContent=s.shift_bags;
