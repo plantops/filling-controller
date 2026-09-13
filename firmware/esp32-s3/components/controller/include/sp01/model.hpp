@@ -54,8 +54,8 @@ enum class Di : std::size_t {
     ProcessInitiative,
     FillPosition,
     BagPresent,
-    DischargeRefA,
-    DischargeRefB,
+    PositionIndex,   // DI7: S4 COUNT UP, one pulse per revolution
+    PositionMark,    // DI8: S1+S2+S3+S5 OR-wired, decoded by angle
 };
 
 enum class Do : std::size_t {
@@ -96,8 +96,12 @@ struct WeightSnapshot {
 // Semantic rotor-position information. The hardware adapter that supplies this
 // signal is intentionally outside the controller core until G8 freezes the
 // as-built 210-degree reference/timing method.
+// Shaft position supplied by the position decoder. The controller acts on
+// angle, never on raw counts: the plant is discussed in degrees.
 struct PositionSnapshot {
-    bool reject_window{false};
+    bool valid{false};          // decoder synced and fault-free
+    float angle_deg{0.0F};      // 0..360, spout position
+    std::uint64_t revolution_us{0};
 };
 
 struct ControllerConfig {
@@ -116,13 +120,20 @@ struct ControllerConfig {
     std::uint64_t fine_timeout_us{5000000};
     std::uint64_t settle_min_us{200000};
     std::uint64_t reject_wait_timeout_us{0};
-    std::uint64_t wait_discharge_timeout_us{6000000};
+    // With angle-based push the wait can approach a full revolution: a bag that
+    // settles just after the discharge angle waits ~14.4 s at rated speed. The
+    // timeout must therefore exceed one revolution with margin, or a healthy
+    // bag faults while waiting for its own push point.
+    std::uint64_t wait_discharge_timeout_us{20000000};
     std::uint64_t push_duration_us{500000};
 
-    // A->B is normalized to 1000 counts. After B, countdown is
-    // discharge_countdown_counts - discharge_lead_counts.
-    std::uint32_t discharge_countdown_counts{1000};
-    std::uint32_t discharge_lead_counts{0};
+    // Push points, in degrees of shaft rotation.
+    //   normal discharge ~355 deg, reject eject ~210 deg (S3).
+    // discharge_lead_deg advances both to compensate valve and mechanism
+    // delay; it is the field tuning knob.
+    float discharge_angle_deg{355.0F};
+    float reject_angle_deg{210.0F};
+    float discharge_lead_deg{0.0F};
 };
 
 struct ControllerSnapshot {
@@ -135,8 +146,10 @@ struct ControllerSnapshot {
     std::uint64_t broken_bag_detected_us{0};
     float broken_bag_peak_kg{0.0F};
     float broken_bag_weight_kg{0.0F};
-    std::uint64_t discharge_ref_interval_us{0};
-    std::uint64_t discharge_due_us{0};
+    bool position_valid{false};
+    float angle_deg{0.0F};
+    float push_angle_deg{0.0F};   // the angle this cycle is waiting for
+    std::uint64_t revolution_us{0};
     std::uint32_t cycle_id{0};
 };
 
