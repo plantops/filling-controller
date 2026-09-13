@@ -89,6 +89,35 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
 .alert ul{margin:6px 0 0;padding-left:19px;font-size:14px;line-height:1.55}
 .alert .fix{font-size:13px;margin-top:9px;opacity:.9}
 
+.chip.pending{border-color:var(--live);color:var(--live);
+  box-shadow:inset 0 0 0 1px var(--live);background:#eef4fb}
+.applybar{display:none;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.applybar.show{display:flex}
+.applybar .msg{font-size:14px;color:var(--ink2);flex:1;min-width:160px}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:9px;padding:12px 20px;font:inherit;font-size:15px;
+  font-weight:600;cursor:pointer}
+.btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* PIN pad */
+.modal{display:none;position:fixed;inset:0;background:#1c2024bf;z-index:9;
+  align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.pin{background:var(--panel);border-radius:14px;padding:22px;width:100%;
+  max-width:330px}
+.pin h3{margin:0 0 4px;font-size:17px}
+.pin p{margin:0 0 14px;font-size:13px;color:var(--ink3)}
+.dots{display:flex;gap:11px;justify-content:center;margin:4px 0 16px}
+.dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--line)}
+.dot.f{background:var(--ink);border-color:var(--ink)}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.pad button{border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);border-radius:10px;padding:17px 0;font:inherit;
+  font-size:21px;font-weight:600;cursor:pointer}
+.pad button:active{background:var(--bg)}
+.pinerr{color:var(--bad);font-size:13px;min-height:19px;margin-top:11px;
+  text-align:center;font-weight:600}
 footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
 
 @media(min-width:720px){
@@ -153,9 +182,34 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
     <div class="chips" id="chips50"></div>
     <div class="fam">40 kg</div>
     <div class="chips" id="chips40"></div>
+    <div class="applybar" id="applybar">
+      <div class="msg" id="applyMsg"></div>
+      <button class="btn" onclick="cancelTarget()" id="btnCancel">Huỷ</button>
+      <button class="btn primary" onclick="openPin()" id="btnApply">Đặt</button>
+    </div>
   </div>
 
   <footer id="foot">SP01</footer>
+</div>
+
+<div class="modal" id="modal">
+  <div class="pin">
+    <h3 id="pinTitle">Nhập mã PIN</h3>
+    <p id="pinSub"></p>
+    <div class="dots"><div class="dot" id="d0"></div><div class="dot" id="d1"></div>
+      <div class="dot" id="d2"></div><div class="dot" id="d3"></div></div>
+    <div class="pad">
+      <button onclick="pinKey('1')">1</button><button onclick="pinKey('2')">2</button>
+      <button onclick="pinKey('3')">3</button><button onclick="pinKey('4')">4</button>
+      <button onclick="pinKey('5')">5</button><button onclick="pinKey('6')">6</button>
+      <button onclick="pinKey('7')">7</button><button onclick="pinKey('8')">8</button>
+      <button onclick="pinKey('9')">9</button>
+      <button onclick="closePin()" id="pinCancel">✕</button>
+      <button onclick="pinKey('0')">0</button>
+      <button onclick="pinDel()">⌫</button>
+    </div>
+    <div class="pinerr" id="pinErr"></div>
+  </div>
 </div>
 
 <script>
@@ -184,7 +238,7 @@ function setLang(l){lang=l;
  document.documentElement.lang=l;
  document.querySelectorAll('[data-t]').forEach(e=>{
    const k=e.dataset.t; if(T[l][k]) e.textContent=T[l][k];});
- if(S)render(S);}
+ if(S){render(S);paintChips();}}
 
 function setWeightMode(m){weightMode=m;
  bLatch.classList.toggle('on',m==='latched');
@@ -197,14 +251,60 @@ function buildChips(){
  mk(chips50,[50.1,50.2,50.3,50.4,50.5,50.6,50.7]);
  mk(chips40,[40.1,40.2,40.3,40.4,40.5,40.6]);
 }
-async function pickTarget(v){
- try{await fetch('/api/op/target',{method:'POST',
-   headers:{'Content-Type':'text/plain'},body:'kg='+v});}catch(e){}
- markTarget(v); refresh();
+// Selecting a chip only stages the change. Nothing is sent until the PIN is
+// accepted by the firmware, so a mis-tap cannot alter a running target.
+let pending=null, pin='';
+function pickTarget(v){
+ pending = (S && Math.abs(v-(S.target_kg||0))<0.001) ? null : v;
+ paintChips(); 
 }
-function markTarget(v){
- document.querySelectorAll('.chip').forEach(c=>
-  c.classList.toggle('on',Math.abs(parseFloat(c.dataset.v)-v)<0.001));
+function paintChips(){
+ const cur = S ? S.target_kg : null;
+ document.querySelectorAll('.chip').forEach(c=>{
+  const v=parseFloat(c.dataset.v);
+  c.classList.toggle('on', cur!==null && Math.abs(v-cur)<0.001 && pending===null);
+  c.classList.toggle('pending', pending!==null && Math.abs(v-pending)<0.001);
+ });
+ const bar=document.getElementById('applybar');
+ bar.classList.toggle('show', pending!==null);
+ if(pending!==null){
+  const t=T[lang];
+  applyMsg.textContent = (lang==='vi'
+    ? 'Đổi từ '+(cur?cur.toFixed(1):'—')+' kg sang '+pending.toFixed(1)+' kg'
+    : 'Change from '+(cur?cur.toFixed(1):'—')+' kg to '+pending.toFixed(1)+' kg');
+  btnCancel.textContent = lang==='vi'?'Huỷ':'Cancel';
+  btnApply.textContent  = lang==='vi'?'Đặt':'Set';
+ }
+}
+function cancelTarget(){pending=null;paintChips();}
+function openPin(){
+ pin=''; paintDots(); pinErr.textContent='';
+ pinTitle.textContent = lang==='vi'?'Nhập mã PIN':'Enter PIN';
+ pinSub.textContent = (lang==='vi'?'Xác nhận đặt ':'Confirm ')+
+   pending.toFixed(1)+' kg';
+ modal.classList.add('show');
+}
+function closePin(){modal.classList.remove('show');pin='';paintDots();}
+function paintDots(){for(let i=0;i<4;i++)
+ document.getElementById('d'+i).classList.toggle('f', i<pin.length);}
+function pinDel(){pin=pin.slice(0,-1);paintDots();pinErr.textContent='';}
+function pinKey(k){
+ if(pin.length>=4)return;
+ pin+=k; paintDots();
+ if(pin.length===4) submitPin();
+}
+async function submitPin(){
+ const t=lang;
+ try{
+  const r=await fetch('/api/op/target',{method:'POST',
+    headers:{'Content-Type':'text/plain'},
+    body:'kg='+pending+'&pin='+pin});
+  if(r.ok){ closePin(); pending=null; refresh(); return; }
+  pinErr.textContent = (t==='vi'?'Mã PIN không đúng':'Wrong PIN');
+ }catch(e){
+  pinErr.textContent = (t==='vi'?'Mất kết nối':'Connection lost');
+ }
+ pin=''; paintDots();
 }
 
 function render(s){
@@ -232,7 +332,7 @@ function render(s){
  dayNote.textContent=t.dayOf;
  tons.textContent=(s.shift_bags*(s.target_kg||0)/1000).toFixed(1);
  tonsNote.textContent=t.tonsNote;
- markTarget(s.target_kg);
+ paintChips();
 
  // Colour only when something is wrong.
  const blocks=s.blocks||[];
