@@ -5,21 +5,43 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(SP01_COMPONENTS ${CMAKE_CURRENT_LIST_DIR}/../esp32-s3/components)
+
+# Controller core plus the derived-truth layer the HMI renders.
 add_library(sp01_controller STATIC
-    ../esp32-s3/components/controller/controller.cpp
+    ${SP01_COMPONENTS}/controller/controller.cpp
+    ${SP01_COMPONENTS}/controller/controller_explain.cpp
 )
 target_include_directories(sp01_controller PUBLIC
-    ${CMAKE_CURRENT_LIST_DIR}/../esp32-s3/components/controller/include
+    ${SP01_COMPONENTS}/controller/include
+)
+
+# Rotary position decoding: pure logic, so it is testable off-target.
+add_library(sp01_position STATIC
+    ${SP01_COMPONENTS}/position/position_decoder.cpp
+)
+target_include_directories(sp01_position PUBLIC
+    ${SP01_COMPONENTS}/position/include
+)
+
+# Clock and shift accounting.
+add_library(sp01_timekeep STATIC
+    ${SP01_COMPONENTS}/timekeep/time_shift.cpp
+)
+target_include_directories(sp01_timekeep PUBLIC
+    ${SP01_COMPONENTS}/timekeep/include
 )
 
 add_library(sp01_host_support INTERFACE)
 target_include_directories(sp01_host_support INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/include
-    ${CMAKE_CURRENT_LIST_DIR}/../esp32-s3/components/controller/include
+    ${SP01_COMPONENTS}/controller/include
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(sp01_controller PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    foreach(lib sp01_controller sp01_position sp01_timekeep)
+        target_compile_options(${lib} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endforeach()
     target_compile_options(sp01_host_support INTERFACE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
@@ -27,14 +49,17 @@ add_executable(sp01_host src/main.cpp)
 target_link_libraries(sp01_host PRIVATE sp01_controller sp01_host_support)
 
 enable_testing()
-add_executable(sp01_host_tests tests/controller_test.cpp)
-target_link_libraries(sp01_host_tests PRIVATE sp01_controller sp01_host_support)
-add_test(NAME sp01_host_tests COMMAND sp01_host_tests)
 
-add_executable(sp01_g3_gate_tests tests/gate_g3_test.cpp)
-target_link_libraries(sp01_g3_gate_tests PRIVATE sp01_controller sp01_host_support)
-add_test(NAME sp01_g3_gate_tests COMMAND sp01_g3_gate_tests)
+function(sp01_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE sp01_controller sp01_host_support
+                          sp01_position sp01_timekeep)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
 
-add_executable(sp01_reject_gate_tests tests/gate_reject_test.cpp)
-target_link_libraries(sp01_reject_gate_tests PRIVATE sp01_controller sp01_host_support)
-add_test(NAME sp01_reject_gate_tests COMMAND sp01_reject_gate_tests)
+sp01_test(sp01_host_tests        tests/controller_test.cpp)
+sp01_test(sp01_g3_gate_tests     tests/gate_g3_test.cpp)
+sp01_test(sp01_reject_gate_tests tests/gate_reject_test.cpp)
+sp01_test(sp01_explain_tests     tests/explain_test.cpp)
+sp01_test(sp01_position_tests    tests/position_decoder_test.cpp)
+sp01_test(sp01_time_shift_tests  tests/time_shift_test.cpp)
