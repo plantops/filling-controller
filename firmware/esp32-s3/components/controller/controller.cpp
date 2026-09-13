@@ -3,7 +3,6 @@
 namespace sp01 {
 namespace {
 
-constexpr std::uint64_t kNormalizedDischargeCounts = 1000;
 
 bool bag_required(State state) noexcept {
     return state == State::TareReady || state == State::CoarseFill ||
@@ -79,10 +78,8 @@ void Controller::reset(std::uint64_t now_us) noexcept {
     snapshot_.state_enter_us = now_us;
     snapshot_.outputs = safe_output_image();
     fill_position_armed_ = false;
-    discharge_ref_a_seen_ = false;
-    prev_discharge_ref_a_ = false;
-    prev_discharge_ref_b_ = false;
-    discharge_ref_a_us_ = 0;
+    have_prev_angle_ = false;
+    prev_angle_deg_ = 0.0F;
     reset_broken_bag_tracking();
 }
 
@@ -212,50 +209,43 @@ bool Controller::broken_bag_detected(std::uint64_t now_us,
     return true;
 }
 
-void Controller::reset_discharge_capture(const InputImage& inputs) noexcept {
-    discharge_ref_a_seen_ = false;
-    discharge_ref_a_us_ = 0;
-    snapshot_.discharge_ref_interval_us = 0;
-    snapshot_.discharge_due_us = 0;
-    prev_discharge_ref_a_ = input(inputs, Di::DischargeRefA);
-    prev_discharge_ref_b_ = input(inputs, Di::DischargeRefB);
+void Controller::reset_discharge_capture() noexcept {
+    have_prev_angle_ = false;
+    prev_angle_deg_ = 0.0F;
+    snapshot_.push_angle_deg = 0.0F;
 }
 
-void Controller::update_discharge_capture(std::uint64_t now_us,
-                                          const InputImage& inputs) noexcept {
-    const bool ref_a = input(inputs, Di::DischargeRefA);
-    const bool ref_b = input(inputs, Di::DischargeRefB);
-    const bool ref_a_rise = ref_a && !prev_discharge_ref_a_;
-    const bool ref_b_rise = ref_b && !prev_discharge_ref_b_;
+// Forward crossing of a target angle, wrap-safe. The shaft turns one way, so a
+// crossing is the tick on which the target falls inside the arc travelled since
+// the previous tick.
+bool Controller::angle_crossed(float target_deg,
+                               const PositionSnapshot& pos) noexcept {
+    if (!pos.valid) return false;
 
-    if (ref_a_rise) {
-        discharge_ref_a_seen_ = true;
-        discharge_ref_a_us_ = now_us;
-        snapshot_.discharge_ref_interval_us = 0;
-        snapshot_.discharge_due_us = 0;
+    float target = target_deg;
+    while (target < 0.0F) target += 360.0F;
+    while (target >= 360.0F) target -= 360.0F;
+
+    const float current = pos.angle_deg;
+    if (!have_prev_angle_) {
+        have_prev_angle_ = true;
+        prev_angle_deg_ = current;
+        return false;
     }
 
-    if (ref_b_rise) {
-        if (!discharge_ref_a_seen_ || now_us <= discharge_ref_a_us_ ||
-            config_.discharge_lead_counts > config_.discharge_countdown_counts) {
-            fault(Fault::DischargeTimingInvalid, now_us);
-        } else {
-            const std::uint64_t interval_us = now_us - discharge_ref_a_us_;
-            const std::uint64_t countdown_counts =
-                static_cast<std::uint64_t>(config_.discharge_countdown_counts -
-                                           config_.discharge_lead_counts);
-            const std::uint64_t delay_us =
-                (interval_us * countdown_counts) / kNormalizedDischargeCounts;
+    const float prev = prev_angle_deg_;
+    prev_angle_deg_ = current;
 
-            snapshot_.discharge_ref_interval_us = interval_us;
-            snapshot_.discharge_due_us = now_us + delay_us;
-            discharge_ref_a_seen_ = false;
-        }
-    }
+    float travelled = current - prev;
+    if (travelled < 0.0F) travelled += 360.0F;
+    if (travelled <= 0.0F || travelled > 180.0F) return false;
 
-    prev_discharge_ref_a_ = ref_a;
-    prev_discharge_ref_b_ = ref_b;
+    float to_target = target - prev;
+    if (to_target < 0.0F) to_target += 360.0F;
+
+    return to_target > 0.0F && to_target <= travelled;
 }
+
 
 OutputImage Controller::outputs_for_state() const noexcept {
     OutputImage out{};
@@ -313,6 +303,14 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                                     const InputImage& inputs,
                                     const WeightSnapshot& weight,
                                     const PositionSnapshot& position) noexcept {
+    snapshot_.position_valid = position.valid;
+    snapshot_.angle_deg = position.angle_deg;
+    snapshot_.revolution_us = position.revolution_us;
+    snapshot_.push_angle_deg =
+        (snapshot_.disposition == BagDisposition::Reject)
+            ? config_.reject_angle_deg - config_.discharge_lead_deg
+            : config_.discharge_angle_deg - config_.discharge_lead_deg;
+
     if (snapshot_.state == State::Fault) {
         snapshot_.outputs = safe_output_image();
         return snapshot_;
@@ -414,6 +412,7 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::WeightStale, now_us);
                 } else if (broken_bag_detected(now_us, weight)) {
                     if (snapshot_.mode == OperationMode::Auto) {
+                        reset_discharge_capture();
                         transition(State::RejectWait, now_us);
                     } else {
                         transition(State::Complete, now_us);
@@ -433,6 +432,7 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::WeightStale, now_us);
                 } else if (broken_bag_detected(now_us, weight)) {
                     if (snapshot_.mode == OperationMode::Auto) {
+                        reset_discharge_capture();
                         transition(State::RejectWait, now_us);
                     } else {
                         transition(State::Complete, now_us);
@@ -461,7 +461,7 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                         transition(State::Complete, now_us);
                     } else {
                         snapshot_.disposition = BagDisposition::Good;
-                        reset_discharge_capture(inputs);
+                        reset_discharge_capture();
                         transition(State::WaitDischarge, now_us);
                     }
                 }
@@ -472,7 +472,11 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::ModeChanged, now_us);
                 } else if (snapshot_.disposition != BagDisposition::Reject) {
                     fault(Fault::IoFault, now_us);
-                } else if (position.reject_window) {
+                } else if (!position.valid) {
+                    fault(Fault::DischargeTimingInvalid, now_us);
+                } else if (angle_crossed(config_.reject_angle_deg -
+                                             config_.discharge_lead_deg,
+                                         position)) {
                     transition(State::Push, now_us);
                 } else if (timed_out(now_us, config_.reject_wait_timeout_us)) {
                     fault(Fault::StateTimeout, now_us);
@@ -484,12 +488,13 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::ModeChanged, now_us);
                     break;
                 }
-                update_discharge_capture(now_us, inputs);
-                if (snapshot_.state != State::Fault && snapshot_.discharge_due_us != 0 &&
-                    now_us >= snapshot_.discharge_due_us) {
+                if (!position.valid) {
+                    fault(Fault::DischargeTimingInvalid, now_us);
+                } else if (angle_crossed(config_.discharge_angle_deg -
+                                             config_.discharge_lead_deg,
+                                         position)) {
                     transition(State::Push, now_us);
-                } else if (snapshot_.state != State::Fault &&
-                           timed_out(now_us, config_.wait_discharge_timeout_us)) {
+                } else if (timed_out(now_us, config_.wait_discharge_timeout_us)) {
                     fault(Fault::StateTimeout, now_us);
                 }
                 break;
