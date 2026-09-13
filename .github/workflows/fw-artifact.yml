@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build ESP32-S3 firmware with ESP-IDF v5.5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -39,7 +41,7 @@ jobs:
           if [ -f "$SRC/flasher_args.json" ]; then cp "$SRC/flasher_args.json" "$DST/"; fi
           if [ -f "$SRC/project_description.json" ]; then cp "$SRC/project_description.json" "$DST/"; fi
           cp VERSION "$DST/VERSION"
-          printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
+          git rev-parse HEAD > "$DST/GIT_SHA"
           printf '%s\n' 'SP01 FIELD PROTOTYPE SHADOW' > "$DST/PROTOTYPE_MODE.txt"
           printf '%s\n' 'Dummy WeightSnapshot enabled; normal process DO held safe OFF; real TLB485 deferred.' >> "$DST/PROTOTYPE_MODE.txt"
       - name: Upload ESP32 flash bundle
