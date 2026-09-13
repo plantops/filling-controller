@@ -453,7 +453,19 @@ async function refresh(){
  }catch(e){offline();}
  setTimeout(refresh,400);
 }
-buildChips(); setLang('vi'); refresh();
+// The board has no RTC. Every page load offers its clock; the firmware keeps
+// the offset against its monotonic timer. tz is minutes to ADD to UTC, which is
+// the negation of what getTimezoneOffset returns.
+async function postTime(){
+ if(PREVIEW)return;
+ try{
+  await fetch('/api/time',{method:'POST',
+   headers:{'Content-Type':'text/plain'},
+   body:'unix_ms='+Date.now()+'&tz='+(-new Date().getTimezoneOffset())});
+ }catch(e){}
+}
+buildChips(); setLang('vi'); postTime(); refresh();
+setInterval(postTime, 300000);
 </script>
 </body>
 </html>
