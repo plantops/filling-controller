@@ -2,9 +2,29 @@
 #include "sp01/host_sim.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 
-#define REQUIRE(expr) do { if (!(expr)) std::abort(); } while (false)
+// Simulated shaft shared by the helpers below. The controller now decides push
+// points by angle, so every test must turn the shaft.
+struct Shaft {
+    bool valid{true};
+    std::uint64_t revolution_us{14400000};
+    float angle_deg{0.0F};
+    sp01::PositionSnapshot snapshot() const {
+        sp01::PositionSnapshot p{};
+        p.valid = valid; p.angle_deg = angle_deg; p.revolution_us = revolution_us;
+        return p;
+    }
+    void advance(std::uint64_t us) {
+        angle_deg += 360.0F * static_cast<float>(us) /
+                     static_cast<float>(revolution_us);
+        while (angle_deg >= 360.0F) angle_deg -= 360.0F;
+    }
+};
+Shaft g_shaft{};
+
+#define REQUIRE(expr) do { if (!(expr)) { std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #expr); std::abort(); } } while (false)
 
 namespace {
 using sp01::BagDisposition;
@@ -33,10 +53,11 @@ sp01::ControllerSnapshot tick(sp01::Controller& ctl,
                               sp01::host::ManualClock& c,
                               sp01::host::VirtualIo& io,
                               sp01::host::VirtualWeigher& w,
-                              const PositionSnapshot& position = {},
                               std::uint64_t advance_us = 10000) {
     c.advance_us(advance_us);
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), position);
+    g_shaft.advance(advance_us);
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(),
+                      g_shaft.snapshot());
     io.commit_outputs(s.outputs);
     return s;
 }
@@ -49,7 +70,7 @@ sp01::ControllerSnapshot enter_auto_coarse(sp01::Controller& ctl,
     set_auto_permissive(io);
     publish(w, c, 0.0F, true);
 
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), g_shaft.snapshot());
     REQUIRE(s.state == State::WaitFillPosition);
 
     io.set_input(Di::FillPosition, true);
@@ -88,7 +109,7 @@ sp01::ControllerConfig reject_config() {
     sp01::ControllerConfig cfg;
     cfg.broken_bag_loss_trip_kg = 0.5F;   // test-only; production frozen in G4/G8
     cfg.broken_bag_persist_us = 20000;    // test-only
-    cfg.reject_wait_timeout_us = 500000;  // test-only
+    cfg.reject_wait_timeout_us = 20000000;  // > one revolution  // test-only
     cfg.push_duration_us = 50000;
     cfg.weight_stale_us = 500000;
     return cfg;
@@ -104,7 +125,7 @@ void increasing_weight_remains_good_candidate() {
     auto s = enter_auto_coarse(ctl, c, io, w);
     for (float kg : {5.0F, 10.0F, 15.0F, 20.0F, 25.0F}) {
         publish(w, c, kg);
-        s = tick(ctl, c, io, w, {}, 20000);
+        s = tick(ctl, c, io, w, 20000);
         REQUIRE(s.state == State::CoarseFill);
         REQUIRE(s.disposition == BagDisposition::Undecided);
         require_fill_outputs_on(s);
@@ -120,12 +141,12 @@ void single_negative_spike_does_not_reject() {
 
     auto s = enter_auto_coarse(ctl, c, io, w);
     publish(w, c, 10.0F);
-    s = tick(ctl, c, io, w, {}, 20000);
+    s = tick(ctl, c, io, w, 20000);
     publish(w, c, 9.0F);
-    s = tick(ctl, c, io, w, {}, 10000);
+    s = tick(ctl, c, io, w, 10000);
     REQUIRE(s.state == State::CoarseFill);
     publish(w, c, 10.2F);
-    s = tick(ctl, c, io, w, {}, 10000);
+    s = tick(ctl, c, io, w, 10000);
     REQUIRE(s.state == State::CoarseFill);
     REQUIRE(s.disposition == BagDisposition::Undecided);
     require_fill_outputs_on(s);
@@ -140,15 +161,15 @@ void sustained_loss_immediately_stops_fill_and_latches_reject() {
 
     auto s = enter_auto_coarse(ctl, c, io, w);
     publish(w, c, 12.0F);
-    s = tick(ctl, c, io, w, {}, 20000);
+    s = tick(ctl, c, io, w, 20000);
     REQUIRE(s.state == State::CoarseFill);
 
     publish(w, c, 11.0F);
-    s = tick(ctl, c, io, w, {}, 10000);
+    s = tick(ctl, c, io, w, 10000);
     REQUIRE(s.state == State::CoarseFill);
 
     publish(w, c, 10.8F);
-    s = tick(ctl, c, io, w, {}, 20000);
+    s = tick(ctl, c, io, w, 20000);
     REQUIRE(s.state == State::RejectWait);
     REQUIRE(s.disposition == BagDisposition::Reject);
     REQUIRE(s.broken_bag_detected_us == c.now_us());
@@ -166,28 +187,30 @@ void reject_pushes_at_210_and_never_uses_normal_path() {
 
     enter_auto_coarse(ctl, c, io, w);
     publish(w, c, 12.0F);
-    tick(ctl, c, io, w, {}, 20000);
+    tick(ctl, c, io, w, 20000);
     publish(w, c, 11.0F);
-    tick(ctl, c, io, w, {}, 10000);
+    tick(ctl, c, io, w, 10000);
     publish(w, c, 10.7F);
-    auto s = tick(ctl, c, io, w, {}, 20000);
+    auto s = tick(ctl, c, io, w, 20000);
     REQUIRE(s.state == State::RejectWait);
 
-    PositionSnapshot reject_window;
-    reject_window.reject_window = true;
-    s = tick(ctl, c, io, w, reject_window, 10000);
+    // Turn the shaft to the reject angle; the controller pushes there.
+    g_shaft.angle_deg = 190.0F;
+    for (int i = 0; i < 400 && s.state == State::RejectWait; ++i) {
+        s = tick(ctl, c, io, w, 10000);
+    }
     REQUIRE(s.state == State::Push);
     REQUIRE(s.disposition == BagDisposition::Reject);
     REQUIRE(sp01::output(s.outputs, Do::BagPush));
     require_fill_outputs_off(s);
 
-    s = tick(ctl, c, io, w, {}, cfg.push_duration_us);
+    s = tick(ctl, c, io, w, cfg.push_duration_us);
     REQUIRE(s.state == State::Complete);
     REQUIRE(s.disposition == BagDisposition::Reject);
     REQUIRE(sp01::all_outputs_off(s.outputs));
 
     // A completed reject cycle cannot re-enter the normal-discharge path.
-    io.set_input(Di::DischargeRefA, true);
+    io.set_input(Di::PositionIndex, true);
     s = tick(ctl, c, io, w);
     REQUIRE(s.state == State::WaitFillPosition);
     REQUIRE(!sp01::output(s.outputs, Do::BagPush));
@@ -196,8 +219,6 @@ void reject_pushes_at_210_and_never_uses_normal_path() {
 void good_path_ignores_210_and_uses_normal_discharge() {
     auto cfg = reject_config();
     cfg.settle_min_us = 20000;
-    cfg.discharge_countdown_counts = 0;
-    cfg.discharge_lead_counts = 0;
     sp01::Controller ctl(cfg);
     sp01::host::ManualClock c;
     sp01::host::VirtualIo io;
@@ -213,23 +234,21 @@ void good_path_ignores_210_and_uses_normal_discharge() {
     s = tick(ctl, c, io, w);
     REQUIRE(s.state == State::Settle);
     publish(w, c, 50.0F, true);
-    s = tick(ctl, c, io, w, {}, cfg.settle_min_us);
+    s = tick(ctl, c, io, w, cfg.settle_min_us);
     REQUIRE(s.state == State::WaitDischarge);
     REQUIRE(s.disposition == BagDisposition::Good);
 
-    PositionSnapshot reject_window;
-    reject_window.reject_window = true;
-    s = tick(ctl, c, io, w, reject_window);
+    g_shaft.angle_deg = 190.0F;
+    for (int i = 0; i < 400 && s.state == State::RejectWait; ++i) {
+        s = tick(ctl, c, io, w);
+    }
     REQUIRE(s.state == State::WaitDischarge);
     REQUIRE(!sp01::output(s.outputs, Do::BagPush));
 
-    io.set_input(Di::DischargeRefA, true);
-    s = tick(ctl, c, io, w);
-    REQUIRE(s.state == State::WaitDischarge);
-    io.set_input(Di::DischargeRefA, false);
-    tick(ctl, c, io, w);
-    io.set_input(Di::DischargeRefB, true);
-    s = tick(ctl, c, io, w);
+    // Carrying on round, the good bag is pushed at the normal discharge angle.
+    for (int i = 0; i < 1000 && s.state == State::WaitDischarge; ++i) {
+        s = tick(ctl, c, io, w);
+    }
     REQUIRE(s.state == State::Push);
     REQUIRE(s.disposition == BagDisposition::Good);
     REQUIRE(sp01::output(s.outputs, Do::BagPush));
@@ -237,7 +256,7 @@ void good_path_ignores_210_and_uses_normal_discharge() {
 
 void reject_window_timeout_faults_safe() {
     auto cfg = reject_config();
-    cfg.reject_wait_timeout_us = 50000;
+    cfg.reject_wait_timeout_us = 20000000;
     sp01::Controller ctl(cfg);
     sp01::host::ManualClock c;
     sp01::host::VirtualIo io;
@@ -245,14 +264,14 @@ void reject_window_timeout_faults_safe() {
 
     enter_auto_coarse(ctl, c, io, w);
     publish(w, c, 10.0F);
-    tick(ctl, c, io, w, {}, 20000);
+    tick(ctl, c, io, w, 20000);
     publish(w, c, 9.0F);
-    tick(ctl, c, io, w, {}, 10000);
+    tick(ctl, c, io, w, 10000);
     publish(w, c, 8.8F);
-    auto s = tick(ctl, c, io, w, {}, 20000);
+    auto s = tick(ctl, c, io, w, 20000);
     REQUIRE(s.state == State::RejectWait);
 
-    s = tick(ctl, c, io, w, {}, cfg.reject_wait_timeout_us);
+    s = tick(ctl, c, io, w, cfg.reject_wait_timeout_us);
     REQUIRE(s.state == State::Fault);
     REQUIRE(sp01::all_outputs_off(s.outputs));
 }
@@ -267,11 +286,11 @@ void detector_is_disabled_outside_fill() {
     io.set_mode(OperationMode::Auto);
     set_auto_permissive(io);
     publish(w, c, 10.0F, true);
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), g_shaft.snapshot());
     REQUIRE(s.state == State::WaitFillPosition);
 
     publish(w, c, 0.0F, true);
-    s = tick(ctl, c, io, w, {}, 50000);
+    s = tick(ctl, c, io, w, 50000);
     REQUIRE(s.state == State::WaitFillPosition);
     REQUIRE(s.disposition == BagDisposition::Undecided);
 }
@@ -287,7 +306,7 @@ void manual_broken_bag_stops_without_automatic_push() {
     io.set_input(Di::HopperFeederRunning, true);
     io.set_input(Di::ProcessInitiative, true);
     publish(w, c, 0.0F, true);
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), g_shaft.snapshot());
     REQUIRE(s.state == State::BagAcquire);
     io.set_input(Di::BagPresent, true);
     tick(ctl, c, io, w);
@@ -297,11 +316,11 @@ void manual_broken_bag_stops_without_automatic_push() {
     REQUIRE(s.state == State::CoarseFill);
 
     publish(w, c, 10.0F);
-    tick(ctl, c, io, w, {}, 20000);
+    tick(ctl, c, io, w, 20000);
     publish(w, c, 9.0F);
-    tick(ctl, c, io, w, {}, 10000);
+    tick(ctl, c, io, w, 10000);
     publish(w, c, 8.7F);
-    s = tick(ctl, c, io, w, {}, 20000);
+    s = tick(ctl, c, io, w, 20000);
     REQUIRE(s.state == State::Complete);
     REQUIRE(s.disposition == BagDisposition::Reject);
     REQUIRE(!sp01::output(s.outputs, Do::BagPush));
