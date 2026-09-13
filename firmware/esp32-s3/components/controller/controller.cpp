@@ -209,6 +209,12 @@ bool Controller::broken_bag_detected(std::uint64_t now_us,
     return true;
 }
 
+void Controller::set_target_kg(float target_kg) noexcept {
+    const float delta = target_kg - config_.target_kg;
+    config_.target_kg = target_kg;
+    config_.coarse_to_fine_kg += delta;
+}
+
 void Controller::reset_discharge_capture() noexcept {
     have_prev_angle_ = false;
     prev_angle_deg_ = 0.0F;
