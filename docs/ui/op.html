@@ -67,7 +67,19 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
 .seg button.on{background:var(--ink);color:#fff}
 
 /* ---- counters ---- */
+.ctx{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;
+  padding:10px 16px;margin-top:12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);font-size:13px;
+  color:var(--ink2)}
+.ctx b{color:var(--ink);font-weight:700}
+.ctx .clk{margin-left:auto;font-size:17px;font-weight:700;color:var(--ink)}
 .cnt{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px}
+.card.rej .big{color:var(--ink)}
+.card.rej.hot .big{color:var(--bad)}
+.chip.queued{border-color:var(--warn);color:var(--warn);background:var(--warnbg)}
+.queuednote{font-size:13px;color:var(--warn);font-weight:600;margin-top:11px;
+  display:none}
+.queuednote.show{display:block}
 .card{background:var(--panel);border:1px solid var(--line);
   border-radius:var(--r);padding:16px 18px}
 .card .cap-l{margin-bottom:9px}
@@ -128,7 +140,7 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
 footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
 
 @media(min-width:720px){
-  .cnt{grid-template-columns:repeat(3,1fr)}
+  .cnt{grid-template-columns:repeat(5,1fr)}
   .wrap{padding:18px}
 }
 @media(max-width:400px){
@@ -157,6 +169,12 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
     <ul id="alertList"></ul>
     <div class="fix" id="alertFix"></div></div>
 
+  <div class="ctx">
+    <span id="ctxDate">—</span>
+    <span id="ctxShift">—</span>
+    <span class="clk" id="ctxClock">—</span>
+  </div>
+
   <div class="hero">
     <div class="cap">
       <span><span class="cap-l" id="heroCap">Bao vừa đổ</span><span class="tgtbadge" id="tgtBadge"><span id="tgtLbl">Đặt</span><b id="tgtVal">—</b></span></span>
@@ -173,14 +191,15 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
 
   <div class="cnt">
     <div class="card"><div class="cap-l" data-t="shift">Bao trong ca</div>
-      <div class="big" id="shift">—</div>
-      <div class="note" id="shiftNote">—</div></div>
+      <div class="big" id="shift">—</div></div>
     <div class="card"><div class="cap-l" data-t="day">Bao trong ngày</div>
-      <div class="big" id="day">—</div>
-      <div class="note" id="dayNote">—</div></div>
+      <div class="big" id="day">—</div></div>
     <div class="card"><div class="cap-l" data-t="tons">Tấn trong ca</div>
-      <div class="big" id="tons">—</div>
-      <div class="note" id="tonsNote">—</div></div>
+      <div class="big" id="tons">—</div></div>
+    <div class="card"><div class="cap-l" data-t="tonsDay">Tấn trong ngày</div>
+      <div class="big" id="tonsDay">—</div></div>
+    <div class="card rej" id="rejCard"><div class="cap-l" data-t="rej">Bao loại trong ca</div>
+      <div class="big" id="rej">—</div></div>
   </div>
 
   <div class="card tgt">
@@ -194,6 +213,7 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
       <button class="btn" onclick="cancelTarget()" id="btnCancel">Huỷ</button>
       <button class="btn primary" onclick="openPin()" id="btnApply">Đặt</button>
     </div>
+    <div class="queuednote" id="queuedNote"></div>
   </div>
 
   <footer id="foot">SP01</footer>
@@ -226,7 +246,8 @@ const T={
   target:'Khối lượng đặt',heroLatch:'Bao vừa đổ',heroLive:'Đang cân',
   live:'Số đang cân',offline:'MẤT KẾT NỐI',online:'Trực tuyến',
   waiting:'Chưa có bao nào hoàn tất',blocked:'Máy đang chờ',
-  set:'Đặt',dev:'lệch',at:'lúc',
+  set:'Đặt',dev:'lệch',at:'lúc',tonsDay:'Tấn trong ngày',rej:'Bao loại trong ca',
+  shiftLbl:'Ca',queued:kg=>'Đã nhận '+kg.toFixed(1)+' kg · áp dụng khi bao hiện tại rời vòi',
   fault:'Lỗi',fix:'Xử lý: kiểm tra các mục trên, sau đó máy tự tiếp tục.',
   shiftOf:s=>'Ca '+s+' · đổi ca 0h / 8h / 16h',dayOf:'Tính từ 0h hôm nay',
   tonsNote:'Cộng dồn trong ca'},
@@ -235,11 +256,24 @@ const T={
   target:'Target weight',heroLatch:'Last bag',heroLive:'Weighing now',
   offline:'OFFLINE',online:'Online',
   waiting:'No completed bag yet',blocked:'Machine waiting',
-  set:'Target',dev:'dev',at:'at',
+  set:'Target',dev:'dev',at:'at',tonsDay:'Tonnes today',rej:'Rejects this shift',
+  shiftLbl:'Shift',queued:kg=>'Accepted '+kg.toFixed(1)+' kg · applies when the current bag leaves the spout',
   fault:'Fault',fix:'Action: clear the items above, then the machine resumes.',
   shiftOf:s=>'Shift '+s+' · changes at 00:00 / 08:00 / 16:00',
   dayOf:'Since midnight',tonsNote:'Accumulated this shift'}
 };
+const ST={
+ vi:{WAIT_PERMISSIVE:'Chờ cho phép',WAIT_FILL_POSITION:'Chờ vị trí nạp',
+  BAG_ACQUIRE:'Chờ bao',BAG_VERIFY:'Kiểm tra bao',TARE_READY:'Quy 0',
+  COARSE_FILL:'Nạp thô',FINE_FILL:'Nạp tinh',CUTOFF:'Ngắt nạp',
+  SETTLE:'Chờ ổn định',REJECT_WAIT:'Chờ loại bao',WAIT_DISCHARGE:'Chờ xả',
+  PUSH:'Đẩy bao',COMPLETE:'Xong bao',FAULT:'Lỗi'},
+ en:{WAIT_PERMISSIVE:'Waiting permissive',WAIT_FILL_POSITION:'Waiting fill position',
+  BAG_ACQUIRE:'Waiting bag',BAG_VERIFY:'Verifying bag',TARE_READY:'Zeroing',
+  COARSE_FILL:'Coarse fill',FINE_FILL:'Fine fill',CUTOFF:'Cut off',
+  SETTLE:'Settling',REJECT_WAIT:'Waiting reject',WAIT_DISCHARGE:'Waiting discharge',
+  PUSH:'Pushing bag',COMPLETE:'Bag complete',FAULT:'Fault'}};
+
 let lang='vi', weightMode='latched', S=null;
 
 function setLang(l){lang=l;
@@ -274,6 +308,17 @@ function paintChips(){
   c.classList.toggle('on', cur!==null && Math.abs(v-cur)<0.001 && pending===null);
   c.classList.toggle('pending', pending!==null && Math.abs(v-pending)<0.001);
  });
+ // A change accepted by PIN but not yet in force: the controller applies it
+ // only once the current bag has left the spout.
+ const q = S && S.target_pending_kg;
+ document.querySelectorAll('.chip').forEach(c=>{
+  const v=parseFloat(c.dataset.v);
+  c.classList.toggle('queued', !!q && Math.abs(v-q)<0.001);
+ });
+ const qn=document.getElementById('queuedNote');
+ qn.classList.toggle('show',!!q);
+ if(q) qn.textContent=T[lang].queued(q);
+
  const bar=document.getElementById('applybar');
  bar.classList.toggle('show', pending!==null);
  if(pending!==null){
@@ -319,7 +364,7 @@ async function submitPin(){
 function render(s){
  S=s; const t=T[lang];
  mach.textContent=s.machine_id+' · '+s.spout_id;
- state.textContent=s.state_text||s.state;
+ state.textContent=(ST[lang][s.state]||s.state);
  conn.textContent=t.online; conn.classList.remove('off');
 
  const live = weightMode==='live';
@@ -349,12 +394,18 @@ function render(s){
    }
  }
 
+ ctxDate.textContent=s.date||'';
+ ctxShift.textContent=t.shiftLbl+' '+s.shift_no+' · '+(s.shift_span||'');
+ ctxClock.textContent=s.clock||'';
+
  shift.textContent=s.shift_bags;
- shiftNote.textContent=t.shiftOf(s.shift_no);
  day.textContent=s.day_bags;
- dayNote.textContent=t.dayOf;
- tons.textContent=(s.shift_bags*(s.target_kg||0)/1000).toFixed(1);
- tonsNote.textContent=t.tonsNote;
+ tons.textContent=((s.shift_kg!==undefined?s.shift_kg
+   :s.shift_bags*(s.target_kg||0))/1000).toFixed(2);
+ tonsDay.textContent=((s.day_kg!==undefined?s.day_kg
+   :s.day_bags*(s.target_kg||0))/1000).toFixed(2);
+ rej.textContent=s.shift_rejects!==undefined?s.shift_rejects:'—';
+ rejCard.classList.toggle('hot',(s.shift_rejects||0)>0);
  paintChips();
 
  // Colour only when something is wrong.
@@ -388,7 +439,10 @@ function demoState(){
  return {machine_id:'MÁY 3',spout_id:'VÒI 7',state:'COARSE_FILL',
   state_text:lang==='vi'?'Đang nạp':'Coarse fill',
   weight_kg:w,last_bag_kg:50.18,last_bag_time:'14:32:07',
-  target_kg:50.2,shift_bags:418,day_bags:1206,shift_no:2,
+  target_kg:50.2,target_pending_kg:null,
+  shift_bags:418,day_bags:1206,shift_no:2,shift_span:'08:00–16:00',
+  shift_kg:418*50.19,day_kg:1206*50.19,shift_rejects:3,
+  date:'13/09/2026',clock:new Date().toTimeString().slice(0,8),
   fault:'NONE',blocks:[],fw:'preview'};
 }
 async function refresh(){
