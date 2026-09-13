@@ -2,9 +2,29 @@
 #include "sp01/host_sim.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 
-#define REQUIRE(expr) do { if (!(expr)) std::abort(); } while (false)
+// Simulated shaft shared by the helpers below. The controller now decides push
+// points by angle, so every test must turn the shaft.
+struct Shaft {
+    bool valid{true};
+    std::uint64_t revolution_us{14400000};
+    float angle_deg{0.0F};
+    sp01::PositionSnapshot snapshot() const {
+        sp01::PositionSnapshot p{};
+        p.valid = valid; p.angle_deg = angle_deg; p.revolution_us = revolution_us;
+        return p;
+    }
+    void advance(std::uint64_t us) {
+        angle_deg += 360.0F * static_cast<float>(us) /
+                     static_cast<float>(revolution_us);
+        while (angle_deg >= 360.0F) angle_deg -= 360.0F;
+    }
+};
+Shaft g_shaft{};
+
+#define REQUIRE(expr) do { if (!(expr)) { std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #expr); std::abort(); } } while (false)
 
 namespace {
 
@@ -35,7 +55,8 @@ sp01::ControllerSnapshot tick(sp01::Controller& ctl,
                               sp01::host::VirtualWeigher& w,
                               std::uint64_t advance_us = 10000) {
     c.advance_us(advance_us);
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    g_shaft.advance(advance_us);
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), g_shaft.snapshot());
     io.commit_outputs(s.outputs);
     return s;
 }
@@ -54,7 +75,7 @@ sp01::ControllerSnapshot enter_auto_bag_acquire(sp01::Controller& ctl,
     set_auto_permissive(io);
     publish(w, c, 0.0F, true);
 
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(), g_shaft.snapshot());
     REQUIRE(s.state == State::WaitFillPosition);
 
     io.set_input(Di::FillPosition, true);
@@ -268,7 +289,7 @@ void discharge_timeout_faults_safe() {
     require_fault_safe(s, Fault::StateTimeout);
 }
 
-void b_before_a_faults_safe() {
+void invalid_position_faults_safe() {
     sp01::ControllerConfig cfg;
     cfg.settle_min_us = 100000;
     cfg.weight_stale_us = 1000000;
@@ -278,8 +299,10 @@ void b_before_a_faults_safe() {
     sp01::host::VirtualWeigher w;
 
     enter_auto_wait_discharge(ctl, c, io, w);
-    io.set_input(Di::DischargeRefB, true);
+    // The decoder loses sync: the controller must not guess where the spout is.
+    g_shaft.valid = false;
     const auto s = tick(ctl, c, io, w);
+    g_shaft.valid = true;
     require_fault_safe(s, Fault::DischargeTimingInvalid);
 }
 
@@ -333,7 +356,7 @@ int main() {
     coarse_timeout_faults_safe();
     fine_timeout_faults_safe();
     discharge_timeout_faults_safe();
-    b_before_a_faults_safe();
+    invalid_position_faults_safe();
     forced_io_fault_and_reset_are_safe();
     fault_clear_requires_initiative_off();
     return 0;
