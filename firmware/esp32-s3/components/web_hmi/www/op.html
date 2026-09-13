@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SP01</title>
+<style>
+/* ISA-101 discipline: neutral light grey ground, colour reserved for the
+   abnormal. A normally running machine is nearly colourless. */
+:root{
+  --bg:#eceef0; --panel:#fff; --line:#d3d7db;
+  --ink:#1c2024; --ink2:#5c646c; --ink3:#868e96;
+  --warn:#b26a00; --warnbg:#fdf3e3;
+  --bad:#a52020;  --badbg:#fbeceb;
+  --live:#0a5ca8;
+  --r:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:14px}
+
+/* ---- identity bar ---- */
+.idbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 16px}
+.mach{font-size:26px;font-weight:700;letter-spacing:-.01em;line-height:1}
+.mach small{display:block;font-size:11px;font-weight:500;color:var(--ink3);
+  letter-spacing:.09em;text-transform:uppercase;margin-bottom:3px}
+.grow{flex:1}
+.state{font-size:15px;font-weight:600;color:var(--ink2)}
+.conn{font-size:12px;color:var(--ink3)}
+.conn.off{color:var(--bad);font-weight:600}
+.lang{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.lang button{border:0;background:var(--panel);color:var(--ink2);
+  padding:6px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.lang button.on{background:var(--ink);color:#fff}
+
+/* ---- headline weight ---- */
+.hero{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:22px 20px;margin-top:12px}
+.hero .cap{display:flex;justify-content:space-between;align-items:center;
+  gap:12px;flex-wrap:wrap}
+.cap-l{font-size:12px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink3)}
+.tgtbadge{display:inline-flex;align-items:baseline;gap:6px;margin-left:12px;
+  padding:4px 10px;border:1px solid var(--line);border-radius:99px;
+  font-size:13px;font-weight:600;color:var(--ink2);text-transform:none;
+  letter-spacing:0;vertical-align:middle}
+.tgtbadge b{font-size:15px;color:var(--ink)}
+.dev{font-weight:700}
+.dev.over{color:var(--warn)} .dev.under{color:var(--warn)}
+.kg{font-size:clamp(58px,15vw,112px);font-weight:700;line-height:.95;
+  letter-spacing:-.03em;margin:10px 0 0}
+.kg .u{font-size:.32em;font-weight:600;color:var(--ink3);margin-left:.16em;
+  letter-spacing:0}
+.kg.live{color:var(--live)}
+.sub{font-size:13px;color:var(--ink3);margin-top:8px}
+
+/* toggle: latched vs live */
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;
+  overflow:hidden}
+.seg button{border:0;background:var(--panel);color:var(--ink2);
+  padding:8px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+  white-space:nowrap}
+.seg button.on{background:var(--ink);color:#fff}
+
+/* ---- counters ---- */
+.ctx{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;
+  padding:10px 16px;margin-top:12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);font-size:13px;
+  color:var(--ink2)}
+.ctx b{color:var(--ink);font-weight:700}
+.ctx .clk{margin-left:auto;font-size:17px;font-weight:700;color:var(--ink)}
+.cnt{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px}
+.card.rej .big{color:var(--ink)}
+.card.rej.hot .big{color:var(--bad)}
+.chip.queued{border-color:var(--warn);color:var(--warn);background:var(--warnbg)}
+.queuednote{font-size:13px;color:var(--warn);font-weight:600;margin-top:11px;
+  display:none}
+.queuednote.show{display:block}
+.card{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:16px 18px}
+.card .cap-l{margin-bottom:9px}
+.big{font-size:clamp(34px,8vw,52px);font-weight:700;line-height:1;
+  letter-spacing:-.02em}
+.note{font-size:12px;color:var(--ink3);margin-top:7px}
+
+/* ---- target ---- */
+.tgt{margin-top:12px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:9px;padding:12px 17px;font:inherit;font-size:17px;
+  font-weight:600;cursor:pointer;min-width:84px}
+.chip:hover{border-color:var(--ink3)}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.fam{font-size:11px;font-weight:600;letter-spacing:.09em;color:var(--ink3);
+  text-transform:uppercase;margin:14px 0 0}
+
+/* ---- abnormal only ---- */
+.alert{display:none;border-radius:var(--r);padding:15px 18px;margin-top:12px;
+  border:1px solid}
+.alert.show{display:block}
+.alert.warn{background:var(--warnbg);border-color:#e8c98d;color:var(--warn)}
+.alert.bad{background:var(--badbg);border-color:#e8b3b0;color:var(--bad)}
+.alert h3{margin:0 0 5px;font-size:16px;font-weight:700}
+.alert ul{margin:6px 0 0;padding-left:19px;font-size:14px;line-height:1.55}
+.alert .fix{font-size:13px;margin-top:9px;opacity:.9}
+
+.chip.pending{border-color:var(--live);color:var(--live);
+  box-shadow:inset 0 0 0 1px var(--live);background:#eef4fb}
+.applybar{display:none;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.applybar.show{display:flex}
+.applybar .msg{font-size:14px;color:var(--ink2);flex:1;min-width:160px}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:9px;padding:12px 20px;font:inherit;font-size:15px;
+  font-weight:600;cursor:pointer}
+.btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* PIN pad */
+.modal{display:none;position:fixed;inset:0;background:#1c2024bf;z-index:9;
+  align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.pin{background:var(--panel);border-radius:14px;padding:22px;width:100%;
+  max-width:330px}
+.pin h3{margin:0 0 4px;font-size:17px}
+.pin p{margin:0 0 14px;font-size:13px;color:var(--ink3)}
+.dots{display:flex;gap:11px;justify-content:center;margin:4px 0 16px}
+.dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--line)}
+.dot.f{background:var(--ink);border-color:var(--ink)}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.pad button{border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);border-radius:10px;padding:17px 0;font:inherit;
+  font-size:21px;font-weight:600;cursor:pointer}
+.pad button:active{background:var(--bg)}
+.pinerr{color:var(--bad);font-size:13px;min-height:19px;margin-top:11px;
+  text-align:center;font-weight:600}
+footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
+
+@media(min-width:720px){
+  .cnt{grid-template-columns:repeat(5,1fr)}
+  .wrap{padding:18px}
+}
+@media(max-width:400px){
+  .mach{font-size:22px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="idbar">
+    <div class="mach"><small data-t="machine">Máy · Vòi</small>
+      <span id="mach">—</span></div>
+    <div class="grow"></div>
+    <div>
+      <div class="state" id="state">—</div>
+      <div class="conn" id="conn">—</div>
+    </div>
+    <div class="lang">
+      <button id="bvi" class="on" onclick="setLang('vi')">VN</button>
+      <button id="ben" onclick="setLang('en')">EN</button>
+    </div>
+  </div>
+
+  <div id="alert" class="alert"><h3 id="alertTitle"></h3>
+    <ul id="alertList"></ul>
+    <div class="fix" id="alertFix"></div></div>
+
+  <div class="ctx">
+    <span id="ctxDate">—</span>
+    <span id="ctxShift">—</span>
+    <span class="clk" id="ctxClock">—</span>
+  </div>
+
+  <div class="hero">
+    <div class="cap">
+      <span><span class="cap-l" id="heroCap">Bao vừa đổ</span><span class="tgtbadge" id="tgtBadge"><span id="tgtLbl">Đặt</span><b id="tgtVal">—</b></span></span>
+      <div class="seg">
+        <button id="bLatch" class="on" onclick="setWeightMode('latched')"
+          data-t="latched">Số chốt</button>
+        <button id="bLive" onclick="setWeightMode('live')"
+          data-t="live">Số đang cân</button>
+      </div>
+    </div>
+    <div class="kg" id="kg">—<span class="u">kg</span></div>
+    <div class="sub" id="kgSub">—</div>
+  </div>
+
+  <div class="cnt">
+    <div class="card"><div class="cap-l" data-t="shift">Bao trong ca</div>
+      <div class="big" id="shift">—</div></div>
+    <div class="card"><div class="cap-l" data-t="day">Bao trong ngày</div>
+      <div class="big" id="day">—</div></div>
+    <div class="card"><div class="cap-l" data-t="tons">Tấn trong ca</div>
+      <div class="big" id="tons">—</div></div>
+    <div class="card"><div class="cap-l" data-t="tonsDay">Tấn trong ngày</div>
+      <div class="big" id="tonsDay">—</div></div>
+    <div class="card rej" id="rejCard"><div class="cap-l" data-t="rej">Bao loại trong ca</div>
+      <div class="big" id="rej">—</div></div>
+  </div>
+
+  <div class="card tgt">
+    <div class="cap-l" data-t="target">Khối lượng đặt</div>
+    <div class="fam">50 kg</div>
+    <div class="chips" id="chips50"></div>
+    <div class="fam">40 kg</div>
+    <div class="chips" id="chips40"></div>
+    <div class="applybar" id="applybar">
+      <div class="msg" id="applyMsg"></div>
+      <button class="btn" onclick="cancelTarget()" id="btnCancel">Huỷ</button>
+      <button class="btn primary" onclick="openPin()" id="btnApply">Đặt</button>
+    </div>
+    <div class="queuednote" id="queuedNote"></div>
+  </div>
+
+  <footer id="foot">SP01</footer>
+</div>
+
+<div class="modal" id="modal">
+  <div class="pin">
+    <h3 id="pinTitle">Nhập mã PIN</h3>
+    <p id="pinSub"></p>
+    <div class="dots"><div class="dot" id="d0"></div><div class="dot" id="d1"></div>
+      <div class="dot" id="d2"></div><div class="dot" id="d3"></div></div>
+    <div class="pad">
+      <button onclick="pinKey('1')">1</button><button onclick="pinKey('2')">2</button>
+      <button onclick="pinKey('3')">3</button><button onclick="pinKey('4')">4</button>
+      <button onclick="pinKey('5')">5</button><button onclick="pinKey('6')">6</button>
+      <button onclick="pinKey('7')">7</button><button onclick="pinKey('8')">8</button>
+      <button onclick="pinKey('9')">9</button>
+      <button onclick="closePin()" id="pinCancel">✕</button>
+      <button onclick="pinKey('0')">0</button>
+      <button onclick="pinDel()">⌫</button>
+    </div>
+    <div class="pinerr" id="pinErr"></div>
+  </div>
+</div>
+
+<script>
+const T={
+ vi:{machine:'Máy · Vòi',latched:'Số chốt',live:'Số đang cân',
+  shift:'Bao trong ca',day:'Bao trong ngày',tons:'Tấn trong ca',
+  target:'Khối lượng đặt',heroLatch:'Bao vừa đổ',heroLive:'Đang cân',
+  live:'Số đang cân',offline:'MẤT KẾT NỐI',online:'Trực tuyến',
+  waiting:'Chưa có bao nào hoàn tất',blocked:'Máy đang chờ',
+  set:'Đặt',dev:'lệch',at:'lúc',tonsDay:'Tấn trong ngày',rej:'Bao loại trong ca',
+  shiftLbl:'Ca',queued:kg=>'Đã nhận '+kg.toFixed(1)+' kg · áp dụng khi bao hiện tại rời vòi',
+  fault:'Lỗi',fix:'Xử lý: kiểm tra các mục trên, sau đó máy tự tiếp tục.',
+  shiftOf:s=>'Ca '+s+' · đổi ca 0h / 8h / 16h',dayOf:'Tính từ 0h hôm nay',
+  tonsNote:'Cộng dồn trong ca'},
+ en:{machine:'Machine · Spout',latched:'Latched',live:'Live',
+  shift:'Bags this shift',day:'Bags today',tons:'Tonnes this shift',
+  target:'Target weight',heroLatch:'Last bag',heroLive:'Weighing now',
+  offline:'OFFLINE',online:'Online',
+  waiting:'No completed bag yet',blocked:'Machine waiting',
+  set:'Target',dev:'dev',at:'at',tonsDay:'Tonnes today',rej:'Rejects this shift',
+  shiftLbl:'Shift',queued:kg=>'Accepted '+kg.toFixed(1)+' kg · applies when the current bag leaves the spout',
+  fault:'Fault',fix:'Action: clear the items above, then the machine resumes.',
+  shiftOf:s=>'Shift '+s+' · changes at 00:00 / 08:00 / 16:00',
+  dayOf:'Since midnight',tonsNote:'Accumulated this shift'}
+};
+const ST={
+ vi:{WAIT_PERMISSIVE:'Chờ cho phép',WAIT_FILL_POSITION:'Chờ vị trí nạp',
+  BAG_ACQUIRE:'Chờ bao',BAG_VERIFY:'Kiểm tra bao',TARE_READY:'Quy 0',
+  COARSE_FILL:'Nạp thô',FINE_FILL:'Nạp tinh',CUTOFF:'Ngắt nạp',
+  SETTLE:'Chờ ổn định',REJECT_WAIT:'Chờ loại bao',WAIT_DISCHARGE:'Chờ xả',
+  PUSH:'Đẩy bao',COMPLETE:'Xong bao',FAULT:'Lỗi'},
+ en:{WAIT_PERMISSIVE:'Waiting permissive',WAIT_FILL_POSITION:'Waiting fill position',
+  BAG_ACQUIRE:'Waiting bag',BAG_VERIFY:'Verifying bag',TARE_READY:'Zeroing',
+  COARSE_FILL:'Coarse fill',FINE_FILL:'Fine fill',CUTOFF:'Cut off',
+  SETTLE:'Settling',REJECT_WAIT:'Waiting reject',WAIT_DISCHARGE:'Waiting discharge',
+  PUSH:'Pushing bag',COMPLETE:'Bag complete',FAULT:'Fault'}};
+
+let lang='vi', weightMode='latched', S=null;
+
+function setLang(l){lang=l;
+ bvi.classList.toggle('on',l==='vi');ben.classList.toggle('on',l==='en');
+ document.documentElement.lang=l;
+ document.querySelectorAll('[data-t]').forEach(e=>{
+   const k=e.dataset.t; if(T[l][k]) e.textContent=T[l][k];});
+ if(S){render(S);paintChips();}}
+
+function setWeightMode(m){weightMode=m;
+ bLatch.classList.toggle('on',m==='latched');
+ bLive.classList.toggle('on',m==='live');
+ if(S)render(S);}
+
+function buildChips(){
+ const mk=(host,list)=>{host.innerHTML=list.map(v=>
+  `<button class="chip" data-v="${v}" onclick="pickTarget(${v})">${v.toFixed(1)}</button>`).join('')};
+ mk(chips50,[50.1,50.2,50.3,50.4,50.5,50.6,50.7]);
+ mk(chips40,[40.1,40.2,40.3,40.4,40.5,40.6]);
+}
+// Selecting a chip only stages the change. Nothing is sent until the PIN is
+// accepted by the firmware, so a mis-tap cannot alter a running target.
+let pending=null, pin='';
+function pickTarget(v){
+ pending = (S && Math.abs(v-(S.target_kg||0))<0.001) ? null : v;
+ paintChips(); 
+}
+function paintChips(){
+ const cur = S ? S.target_kg : null;
+ document.querySelectorAll('.chip').forEach(c=>{
+  const v=parseFloat(c.dataset.v);
+  c.classList.toggle('on', cur!==null && Math.abs(v-cur)<0.001 && pending===null);
+  c.classList.toggle('pending', pending!==null && Math.abs(v-pending)<0.001);
+ });
+ // A change accepted by PIN but not yet in force: the controller applies it
+ // only once the current bag has left the spout.
+ const q = S && S.target_pending_kg;
+ document.querySelectorAll('.chip').forEach(c=>{
+  const v=parseFloat(c.dataset.v);
+  c.classList.toggle('queued', !!q && Math.abs(v-q)<0.001);
+ });
+ const qn=document.getElementById('queuedNote');
+ qn.classList.toggle('show',!!q);
+ if(q) qn.textContent=T[lang].queued(q);
+
+ const bar=document.getElementById('applybar');
+ bar.classList.toggle('show', pending!==null);
+ if(pending!==null){
+  const t=T[lang];
+  applyMsg.textContent = (lang==='vi'
+    ? 'Đổi từ '+(cur?cur.toFixed(1):'—')+' kg sang '+pending.toFixed(1)+' kg'
+    : 'Change from '+(cur?cur.toFixed(1):'—')+' kg to '+pending.toFixed(1)+' kg');
+  btnCancel.textContent = lang==='vi'?'Huỷ':'Cancel';
+  btnApply.textContent  = lang==='vi'?'Đặt':'Set';
+ }
+}
+function cancelTarget(){pending=null;paintChips();}
+function openPin(){
+ pin=''; paintDots(); pinErr.textContent='';
+ pinTitle.textContent = lang==='vi'?'Nhập mã PIN':'Enter PIN';
+ pinSub.textContent = (lang==='vi'?'Xác nhận đặt ':'Confirm ')+
+   pending.toFixed(1)+' kg';
+ modal.classList.add('show');
+}
+function closePin(){modal.classList.remove('show');pin='';paintDots();}
+function paintDots(){for(let i=0;i<4;i++)
+ document.getElementById('d'+i).classList.toggle('f', i<pin.length);}
+function pinDel(){pin=pin.slice(0,-1);paintDots();pinErr.textContent='';}
+function pinKey(k){
+ if(pin.length>=4)return;
+ pin+=k; paintDots();
+ if(pin.length===4) submitPin();
+}
+async function submitPin(){
+ const t=lang;
+ try{
+  const r=await fetch('/api/op/target',{method:'POST',
+    headers:{'Content-Type':'text/plain'},
+    body:'kg='+pending+'&pin='+pin});
+  if(r.ok){ closePin(); pending=null; refresh(); return; }
+  pinErr.textContent = (t==='vi'?'Mã PIN không đúng':'Wrong PIN');
+ }catch(e){
+  pinErr.textContent = (t==='vi'?'Mất kết nối':'Connection lost');
+ }
+ pin=''; paintDots();
+}
+
+function render(s){
+ S=s; const t=T[lang];
+ mach.textContent=s.machine_id+' · '+s.spout_id;
+ state.textContent=(ST[lang][s.state]||s.state);
+ conn.textContent=t.online; conn.classList.remove('off');
+
+ const live = weightMode==='live';
+ heroCap.textContent = live ? t.heroLive : t.heroLatch;
+ const val = live ? s.weight_kg : s.last_bag_kg;
+ kg.classList.toggle('live',live);
+
+ // Target always visible beside the weight, in both modes.
+ tgtLbl.textContent = t.set;
+ tgtVal.textContent = s.target_kg ? s.target_kg.toFixed(1)+' kg' : '—';
+
+ if(val===null||val===undefined){
+   kg.innerHTML='—<span class="u">kg</span>'; kgSub.textContent=t.waiting;
+ }else{
+   kg.innerHTML=val.toFixed(2)+'<span class="u">kg</span>';
+   if(live){
+     const togo = (s.target_kg||0)-val;
+     kgSub.textContent = s.target_kg
+       ? (togo>0 ? '→ '+togo.toFixed(2)+' kg' : '') : '';
+   }else{
+     const d=(s.target_kg? val-s.target_kg : null);
+     const dt = d===null ? '' :
+       t.dev+' '+(d>=0?'+':'')+d.toFixed(2)+' kg';
+     kgSub.innerHTML = (s.last_bag_time? t.at+' '+s.last_bag_time+' · ':'')+
+       (d===null?'':'<span class="dev '+(Math.abs(d)>0.3?(d>0?'over':'under'):'')+
+        '">'+dt+'</span>');
+   }
+ }
+
+ ctxDate.textContent=s.date||'';
+ ctxShift.textContent=t.shiftLbl+' '+s.shift_no+' · '+(s.shift_span||'');
+ ctxClock.textContent=s.clock||'';
+
+ shift.textContent=s.shift_bags;
+ day.textContent=s.day_bags;
+ tons.textContent=((s.shift_kg!==undefined?s.shift_kg
+   :s.shift_bags*(s.target_kg||0))/1000).toFixed(2);
+ tonsDay.textContent=((s.day_kg!==undefined?s.day_kg
+   :s.day_bags*(s.target_kg||0))/1000).toFixed(2);
+ rej.textContent=s.shift_rejects!==undefined?s.shift_rejects:'—';
+ rejCard.classList.toggle('hot',(s.shift_rejects||0)>0);
+ paintChips();
+
+ // Colour only when something is wrong.
+ const blocks=s.blocks||[];
+ if(s.fault && s.fault!=='NONE'){
+   alert_(true,'bad',t.fault+' · '+s.fault,[s.fault_text||''],t.fix);
+ }else if(blocks.length){
+   alert_(true,'warn',t.blocked,blocks.map(b=>b.text),'');
+ }else alert_(false);
+ foot.textContent='SP01 · '+s.machine_id+' · '+s.spout_id+' · '+(s.fw||'');
+}
+function alert_(show,kind,title,items,fix){
+ const a=document.getElementById('alert');
+ a.className='alert'+(show?' show '+kind:'');
+ if(!show)return;
+ alertTitle.textContent=title;
+ alertList.innerHTML=items.filter(Boolean).map(x=>`<li>${x}</li>`).join('');
+ alertFix.textContent=fix||'';
+}
+function offline(){
+ conn.textContent=T[lang].offline; conn.classList.add('off');
+}
+
+// ---- data ----
+const PREVIEW = location.protocol==='file:';
+let demo={t:0};
+function demoState(){
+ demo.t+=0.4;
+ const filling=(demo.t%14.4)<9;
+ const w=filling?Math.min(50.2,(demo.t%14.4)*6.2):50.2;
+ return {machine_id:'MÁY 3',spout_id:'VÒI 7',state:'COARSE_FILL',
+  state_text:lang==='vi'?'Đang nạp':'Coarse fill',
+  weight_kg:w,last_bag_kg:50.18,last_bag_time:'14:32:07',
+  target_kg:50.2,target_pending_kg:null,
+  shift_bags:418,day_bags:1206,shift_no:2,shift_span:'08:00–16:00',
+  shift_kg:418*50.19,day_kg:1206*50.19,shift_rejects:3,
+  date:'13/09/2026',clock:new Date().toTimeString().slice(0,8),
+  fault:'NONE',blocks:[],fw:'preview'};
+}
+async function refresh(){
+ try{
+  const s = PREVIEW ? demoState()
+    : await (await fetch('/api/state',{cache:'no-store'})).json();
+  render(s);
+ }catch(e){offline();}
+ setTimeout(refresh,400);
+}
+// The board has no RTC. Every page load offers its clock; the firmware keeps
+// the offset against its monotonic timer. tz is minutes to ADD to UTC, which is
+// the negation of what getTimezoneOffset returns.
+async function postTime(){
+ if(PREVIEW)return;
+ try{
+  await fetch('/api/time',{method:'POST',
+   headers:{'Content-Type':'text/plain'},
+   body:'unix_ms='+Date.now()+'&tz='+(-new Date().getTimezoneOffset())});
+ }catch(e){}
+}
+buildChips(); setLang('vi'); postTime(); refresh();
+setInterval(postTime, 300000);
+</script>
+</body>
+</html>
