@@ -21,6 +21,11 @@ public:
     [[nodiscard]] const ControllerSnapshot& snapshot() const noexcept { return snapshot_; }
     [[nodiscard]] const ControllerConfig& config() const noexcept { return config_; }
 
+    // Retarget between bags. Thresholds derived from the target move with it.
+    // Calling this mid-fill would give one bag two different cutoffs, so the
+    // application applies a queued change only when the spout is clear.
+    void set_target_kg(float target_kg) noexcept;
+
 private:
     ControllerConfig config_{};
     ControllerSnapshot snapshot_{};
