@@ -185,4 +185,26 @@ config SP01_VIRTUAL_IO
         Bench and remote-development use only. Never enable on a node connected
         to machine wiring.
 
+config SP01_MACHINE_ID
+    string "Machine identifier shown on the operator screen"
+    default "MAY ?"
+
+config SP01_SPOUT_ID
+    string "Spout identifier shown on the operator screen"
+    default "VOI ?"
+
+config SP01_OPERATOR_PIN
+    string "Operator PIN, confirms a target change"
+    default "1111"
+    help
+        Four digits. This confirms intent; it is not access control. Entry is
+        locked for 30 s after five wrong attempts, which is what makes a short
+        PIN worth anything at all.
+
+config SP01_SUPERVISOR_PIN
+    string "Supervisor PIN, edits recipe values"
+    default "111111"
+    help
+        Six digits. Same caveat as the operator PIN.
+
 endmenu
