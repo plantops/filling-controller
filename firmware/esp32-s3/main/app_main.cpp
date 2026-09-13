@@ -1,5 +1,8 @@
 #include "sp01/board_io.hpp"
 #include "sp01/controller.hpp"
+#include "sp01/controller_explain.hpp"
+#include "sp01/position_decoder.hpp"
+#include "sp01/time_shift.hpp"
 #include "sp01/tlb485.hpp"
 #include "sp01/web_hmi.hpp"
 
@@ -32,6 +35,49 @@ sp01::InputImage g_inputs{};
 sp01::WeightSnapshot g_weight_snapshot{};
 sp01::ControllerSnapshot g_controller_snapshot{};
 sp01::OutputImage g_commanded_outputs{};
+
+// Position, clock and shift accounting live beside the controller so every
+// derived value the HMI shows is computed in firmware, never in the browser.
+sp01::PositionDecoder g_position{};
+sp01::PositionSnapshot g_last_position{};
+sp01::TimeKeeper g_clock{};
+sp01::ShiftTracker g_shifts{};
+
+// A target accepted over the HMI waits here until the spout is clear: applying
+// it mid-fill would give one bag two different cutoff thresholds.
+float g_target_pending_kg = 0.0F;
+bool g_had_last_bag = false;
+float g_last_bag_kg = 0.0F;
+char g_last_bag_time[12] = "";
+std::uint32_t g_last_counted_cycle = 0;
+
+bool spout_clear(sp01::State state) noexcept {
+    switch (state) {
+        case sp01::State::WaitPermissive:
+        case sp01::State::WaitFillPosition:
+        case sp01::State::Complete:
+        case sp01::State::Fault:
+            return true;
+        default:
+            return false;
+    }
+}
+
+sp01::HmiResult on_target_request(float kg) {
+    portENTER_CRITICAL(&g_status_mux);
+    g_target_pending_kg = kg;
+    portEXIT_CRITICAL(&g_status_mux);
+    ESP_LOGI(kTag, "target %.1f kg queued until the spout is clear",
+             static_cast<double>(kg));
+    return sp01::HmiResult::Ok;
+}
+
+void on_browser_time(std::uint64_t unix_ms, std::int16_t tz_offset_min) {
+    const bool first = !g_clock.synced();
+    g_clock.sync_from_browser(static_cast<std::uint64_t>(esp_timer_get_time()),
+                              unix_ms, tz_offset_min);
+    if (first) ESP_LOGI(kTag, "clock synced from browser");
+}
 sp01::ControllerConfig g_controller_config{};
 std::uint8_t g_bench_do_channel = 0;
 std::uint64_t g_bench_do_until_us = 0;
@@ -182,171 +228,8 @@ bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
     return weight.sample_time_us <= now && now - weight.sample_time_us <= g_controller_config.weight_stale_us;
 }
 
-bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
-    if (!g_controller || !g_tlb) return false;
-    portENTER_CRITICAL(&g_status_mux);
-    out.inputs = g_inputs;
-    out.weight = g_weight_snapshot;
-    out.controller = g_controller_snapshot;
-    out.commanded_outputs = g_commanded_outputs;
-    portEXIT_CRITICAL(&g_status_mux);
-#if CONFIG_SP01_TLB_ENABLE
-    out.tlb = g_tlb->diagnostics();
-#else
-    out.tlb = {};
-#endif
-
-    const bool machine_stopped = !sp01::input(out.inputs, sp01::Di::MachineMotorRunning);
-    const bool fill_switch_off = !sp01::input(out.inputs, sp01::Di::ProcessInitiative);
-    out.service_ready = machine_stopped && fill_switch_off &&
-                        out.controller.state == sp01::State::WaitPermissive &&
-                        sp01::all_outputs_off(out.controller.outputs) &&
-                        sp01::all_outputs_off(out.commanded_outputs) &&
-                        out.weight.stable && weight_fresh_now(out.weight);
-    return true;
-}
-
-bool service_ready() noexcept {
-    sp01::HmiSnapshot s{};
-    return fill_hmi_snapshot(s) && s.service_ready;
-}
-
-esp_err_t hmi_cal_zero() noexcept {
-#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
-    return ESP_ERR_NOT_SUPPORTED;
-#else
-    if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
-    return g_tlb->calibration_zero();
-#endif
-}
-
-esp_err_t hmi_cal_span(float kg) noexcept {
-#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
-    (void)kg;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
-    if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
-    return g_tlb->calibration_span(kg);
-#endif
-}
-
-esp_err_t hmi_bench_do_pulse(std::uint8_t channel, std::uint32_t pulse_ms) noexcept {
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-    if (channel < 1 || channel > 8 || pulse_ms == 0 || pulse_ms > 1000) return ESP_ERR_INVALID_ARG;
-    const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-    portENTER_CRITICAL(&g_status_mux);
-    g_bench_do_channel = channel;
-    g_bench_do_until_us = now + static_cast<std::uint64_t>(pulse_ms) * 1000ULL;
-    portEXIT_CRITICAL(&g_status_mux);
-    ESP_LOGW(kTag, "G2 BENCH pulse DO%u for %" PRIu32 " ms", static_cast<unsigned>(channel), pulse_ms);
-    return ESP_OK;
-#else
-    (void)channel;
-    (void)pulse_ms;
-    return ESP_ERR_NOT_SUPPORTED;
-#endif
-}
-
-esp_err_t hmi_bench_do_off() noexcept {
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-    portENTER_CRITICAL(&g_status_mux);
-    g_bench_do_channel = 0;
-    g_bench_do_until_us = 0;
-    portEXIT_CRITICAL(&g_status_mux);
-    return ESP_OK;
-#else
-    return ESP_ERR_NOT_SUPPORTED;
-#endif
-}
-
-#if CONFIG_SP01_TLB_ENABLE
-void weighing_task(void*) {
-    TickType_t last = xTaskGetTickCount();
-    for (;;) {
-        const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-        const esp_err_t err = g_tlb->poll_once(now);
-        if (err != ESP_OK) ESP_LOGD(kTag, "TLB poll: %s", esp_err_to_name(err));
-        vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_TLB_POLL_MS));
-    }
-}
-#endif
-
-void control_task(void*) {
-    (void)esp_task_wdt_add(nullptr);
-    TickType_t last = xTaskGetTickCount();
-    auto previous_state = g_controller->snapshot().state;
-
-    for (;;) {
-        const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-        sp01::InputImage inputs{};
-        esp_err_t io_err = g_io->read_inputs(inputs);
-        sp01::ControllerSnapshot snapshot{};
-        sp01::OutputImage commanded_outputs{};
-        sp01::WeightSnapshot weight{};
-
-        if (io_err != ESP_OK) {
-            g_controller->force_fault(sp01::Fault::IoFault, now);
-            snapshot = g_controller->snapshot();
-            (void)g_io->force_safe();
-            commanded_outputs = g_io->last_commanded_outputs();
-        } else {
-            inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
-                              ? sp01::OperationMode::Auto
-                              : sp01::OperationMode::Manual;
-
-            weight = current_weight(now);
-            snapshot = g_controller->tick(now, inputs, weight);
-
-            sp01::OutputImage physical_outputs = snapshot.outputs;
-#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // Prototype/shadow modes never apply normal process outputs to the board.
-            physical_outputs = sp01::safe_output_image();
-#endif
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // Optional disconnected-bench one-hot pulse path.
-            std::uint8_t bench_channel = 0;
-            std::uint64_t bench_until = 0;
-            portENTER_CRITICAL(&g_status_mux);
-            bench_channel = g_bench_do_channel;
-            bench_until = g_bench_do_until_us;
-            if (bench_channel != 0 && now >= bench_until) {
-                g_bench_do_channel = 0;
-                g_bench_do_until_us = 0;
-                bench_channel = 0;
-            }
-            portEXIT_CRITICAL(&g_status_mux);
-            if (bench_channel >= 1 && bench_channel <= 8) {
-                physical_outputs.channels[bench_channel - 1] = true;
-            }
-#endif
-
-            io_err = g_io->commit_outputs(physical_outputs);
-            if (io_err != ESP_OK) {
-                (void)g_io->force_safe();
-                g_controller->force_fault(sp01::Fault::IoFault, now);
-                snapshot = g_controller->snapshot();
-            }
-            commanded_outputs = g_io->last_commanded_outputs();
-        }
-
-        portENTER_CRITICAL(&g_status_mux);
-        g_inputs = inputs;
-        g_weight_snapshot = weight;
-        g_controller_snapshot = snapshot;
-        g_commanded_outputs = commanded_outputs;
-        portEXIT_CRITICAL(&g_status_mux);
-
-        if (snapshot.state != previous_state) {
-            ESP_LOGI(kTag, "%s -> %s fault=%s",
-                     sp01::state_name(previous_state), sp01::state_name(snapshot.state),
-                     sp01::fault_name(snapshot.fault));
-            previous_state = snapshot.state;
-        }
-
-        (void)esp_task_wdt_reset();
-        vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_CONTROL_PERIOD_MS));
-    }
-}
+// The HMI no longer pulls a snapshot: the control loop pushes one coherent
+// picture each tick via hmi_publish(), produced next to the controller.
 
 void start_field_hotspot_if_needed() noexcept {
     if (CONFIG_SP01_WIFI_SSID[0] != '\0') {
@@ -453,15 +336,28 @@ extern "C" void app_main(void) {
         ESP_LOGI(kTag, "GPIO ISR service ready for W5500 IRQ");
     }
 
-    sp01::WebHmiConfig web{};
-    web.ssid = CONFIG_SP01_WIFI_SSID;
-    web.password = CONFIG_SP01_WIFI_PASSWORD;
-    web.service_token = CONFIG_SP01_SERVICE_TOKEN;
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-    web.bench_do_enabled = true;
-#endif
-    const esp_err_t web_err = sp01::web_hmi_start(web, fill_hmi_snapshot, hmi_cal_zero, hmi_cal_span,
-                                                  hmi_bench_do_pulse, hmi_bench_do_off);
+    sp01::HmiIdentity identity{};
+    std::snprintf(identity.machine, sizeof(identity.machine), "%s",
+                  CONFIG_SP01_MACHINE_ID);
+    std::snprintf(identity.spout, sizeof(identity.spout), "%s",
+                  CONFIG_SP01_SPOUT_ID);
+    const esp_app_desc_t* desc = esp_app_get_description();
+    if (desc != nullptr) {
+        std::snprintf(identity.firmware, sizeof(identity.firmware), "%s",
+                      desc->version);
+    }
+
+    sp01::HmiPins pins{};
+    std::snprintf(pins.operator_pin, sizeof(pins.operator_pin), "%s",
+                  CONFIG_SP01_OPERATOR_PIN);
+    std::snprintf(pins.supervisor_pin, sizeof(pins.supervisor_pin), "%s",
+                  CONFIG_SP01_SUPERVISOR_PIN);
+
+    sp01::HmiCallbacks callbacks{};
+    callbacks.request_target = &on_target_request;
+    callbacks.set_time = &on_browser_time;
+
+    const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
         ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
     } else {
