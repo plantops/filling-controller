@@ -2,9 +2,10 @@
 #include "sp01/host_sim.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 
-#define REQUIRE(expr) do { if (!(expr)) std::abort(); } while (false)
+#define REQUIRE(expr) do { if (!(expr)) { std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #expr); std::abort(); } } while (false)
 
 namespace {
 
@@ -30,14 +31,52 @@ void publish(sp01::host::VirtualWeigher& w,
     w.publish(kg, stable, quality, c.now_us());
 }
 
+// Simulated shaft. Angle advances with the clock so the controller sees the
+// same position signal it will get from the decoder on the machine.
+struct Shaft {
+    bool valid{true};
+    std::uint64_t revolution_us{14400000};
+    float angle_deg{0.0F};
+
+    sp01::PositionSnapshot snapshot() const {
+        sp01::PositionSnapshot p{};
+        p.valid = valid;
+        p.angle_deg = angle_deg;
+        p.revolution_us = revolution_us;
+        return p;
+    }
+    void advance(std::uint64_t us) {
+        angle_deg += 360.0F * static_cast<float>(us) /
+                     static_cast<float>(revolution_us);
+        while (angle_deg >= 360.0F) angle_deg -= 360.0F;
+    }
+};
+
+Shaft g_shaft{};
+
 sp01::ControllerSnapshot tick(sp01::Controller& ctl,
                               sp01::host::ManualClock& c,
                               sp01::host::VirtualIo& io,
                               sp01::host::VirtualWeigher& w,
                               std::uint64_t advance_us = 10000) {
     c.advance_us(advance_us);
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    g_shaft.advance(advance_us);
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(),
+                      g_shaft.snapshot());
     io.commit_outputs(s.outputs);
+    return s;
+}
+
+// Turn the shaft until the controller leaves the given state, or give up.
+sp01::ControllerSnapshot run_until_leaves(sp01::Controller& ctl,
+                                          sp01::host::ManualClock& c,
+                                          sp01::host::VirtualIo& io,
+                                          sp01::host::VirtualWeigher& w,
+                                          State state) {
+    sp01::ControllerSnapshot s = ctl.snapshot();
+    for (int i = 0; i < 4000 && s.state == state; ++i) {
+        s = tick(ctl, c, io, w, 10000);
+    }
     return s;
 }
 
@@ -49,7 +88,8 @@ sp01::ControllerSnapshot enter_auto_coarse(sp01::Controller& ctl,
     set_auto_permissive(io);
     publish(w, c, 0.0F, true);
 
-    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest());
+    auto s = ctl.tick(c.now_us(), io.read_inputs(), w.latest(),
+                      g_shaft.snapshot());
     REQUIRE(s.state == State::WaitFillPosition);
 
     io.set_input(Di::FillPosition, false);
@@ -99,8 +139,9 @@ void normal_auto_cycle() {
     sp01::ControllerConfig cfg;
     cfg.settle_min_us = 100000;
     cfg.push_duration_us = 100000;
-    cfg.discharge_countdown_counts = 1000;
-    cfg.discharge_lead_counts = 0;
+
+    g_shaft = Shaft{};
+    g_shaft.angle_deg = 0.0F;
 
     sp01::Controller ctl(cfg);
     sp01::host::ManualClock c;
@@ -113,24 +154,24 @@ void normal_auto_cycle() {
     REQUIRE(sp01::output(s.outputs, Do::DosingValveC));
 
     s = finish_to_auto_discharge(ctl, c, io, w);
+    REQUIRE(s.state == State::WaitDischarge);
+    REQUIRE(s.disposition == sp01::BagDisposition::Good);
 
-    io.set_input(Di::DischargeRefA, true);
-    s = tick(ctl, c, io, w, 10000);
+    // Park the shaft at a known angle; the controller latches its reference on
+    // the first tick after entering WaitDischarge.
+    g_shaft.angle_deg = 0.0F;
+
+    // A good bag must not be pushed at the reject angle.
+    while (g_shaft.angle_deg < 250.0F && s.state == State::WaitDischarge) {
+        s = tick(ctl, c, io, w, 10000);
+    }
     REQUIRE(s.state == State::WaitDischarge);
 
-    io.set_input(Di::DischargeRefA, false);
-    tick(ctl, c, io, w, 10000);
-
-    io.set_input(Di::DischargeRefB, true);
-    s = tick(ctl, c, io, w, 90000);
-    REQUIRE(s.discharge_ref_interval_us == 100000);
-    REQUIRE(s.discharge_due_us == c.now_us() + 100000);
-    REQUIRE(s.state == State::WaitDischarge);
-
-    io.set_input(Di::DischargeRefB, false);
-    s = tick(ctl, c, io, w, 100000);
+    // It is pushed when the shaft reaches the normal discharge angle.
+    s = run_until_leaves(ctl, c, io, w, State::WaitDischarge);
     REQUIRE(s.state == State::Push);
     REQUIRE(sp01::output(s.outputs, Do::BagPush));
+    REQUIRE(g_shaft.angle_deg >= 353.0F);
 
     s = tick(ctl, c, io, w, 100000);
     REQUIRE(s.state == State::Complete);
@@ -138,39 +179,53 @@ void normal_auto_cycle() {
     REQUIRE(s.cycle_id == 1);
 }
 
-std::uint64_t measured_countdown(std::uint64_t ab_interval_us) {
+void discharge_requires_valid_position() {
     sp01::ControllerConfig cfg;
     cfg.settle_min_us = 100000;
-    cfg.discharge_countdown_counts = 1000;
-    cfg.discharge_lead_counts = 100;
 
+    g_shaft = Shaft{};
     sp01::Controller ctl(cfg);
     sp01::host::ManualClock c;
     sp01::host::VirtualIo io;
     sp01::host::VirtualWeigher w;
 
     enter_auto_coarse(ctl, c, io, w);
-    finish_to_auto_discharge(ctl, c, io, w);
-
-    io.set_input(Di::DischargeRefA, true);
-    auto s = tick(ctl, c, io, w, 10000);
+    auto s = finish_to_auto_discharge(ctl, c, io, w);
     REQUIRE(s.state == State::WaitDischarge);
-    const auto a_time = c.now_us();
+    g_shaft.angle_deg = 0.0F;
 
-    io.set_input(Di::DischargeRefA, false);
-    tick(ctl, c, io, w, 10000);
-
-    io.set_input(Di::DischargeRefB, true);
-    const auto remaining = ab_interval_us - 10000;
-    s = tick(ctl, c, io, w, remaining);
-    REQUIRE(s.discharge_ref_interval_us == ab_interval_us);
-    REQUIRE(c.now_us() - a_time == ab_interval_us);
-    return s.discharge_due_us - c.now_us();
+    // Decoder loses sync: the controller must fault rather than guess.
+    g_shaft.valid = false;
+    s = tick(ctl, c, io, w, 10000);
+    REQUIRE(s.state == State::Fault);
+    REQUIRE(s.fault == Fault::DischargeTimingInvalid);
+    REQUIRE(sp01::all_outputs_off(s.outputs));
 }
 
 void discharge_tracks_speed() {
-    REQUIRE(measured_countdown(100000) == 90000);
-    REQUIRE(measured_countdown(50000) == 45000);
+    // Angle-based push holds at the same angle when the shaft runs slower.
+    for (std::uint64_t rev : {14400000ULL, 21600000ULL}) {
+        sp01::ControllerConfig cfg;
+        cfg.settle_min_us = 100000;
+        cfg.push_duration_us = 100000;
+        cfg.wait_discharge_timeout_us = 30000000;
+
+        g_shaft = Shaft{};
+        g_shaft.revolution_us = rev;
+
+        sp01::Controller ctl(cfg);
+        sp01::host::ManualClock c;
+        sp01::host::VirtualIo io;
+        sp01::host::VirtualWeigher w;
+
+        enter_auto_coarse(ctl, c, io, w);
+        auto s = finish_to_auto_discharge(ctl, c, io, w);
+        g_shaft.angle_deg = 0.0F;
+        s = run_until_leaves(ctl, c, io, w, State::WaitDischarge);
+        REQUIRE(s.state == State::Push);
+        REQUIRE(g_shaft.angle_deg >= 353.0F);
+        REQUIRE(g_shaft.angle_deg <= 359.9F);
+    }
 }
 
 void manual_fill_without_rotation_or_push() {
@@ -279,6 +334,7 @@ void mode_change_during_fill_faults_safe() {
 
 int main() {
     normal_auto_cycle();
+    discharge_requires_valid_position();
     discharge_tracks_speed();
     manual_fill_without_rotation_or_push();
     manual_off_stops_fill_cleanly();
