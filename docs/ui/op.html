@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SP01</title>
+<style>
+/* ISA-101 discipline: neutral light grey ground, colour reserved for the
+   abnormal. A normally running machine is nearly colourless. */
+:root{
+  --bg:#eceef0; --panel:#fff; --line:#d3d7db;
+  --ink:#1c2024; --ink2:#5c646c; --ink3:#868e96;
+  --warn:#b26a00; --warnbg:#fdf3e3;
+  --bad:#a52020;  --badbg:#fbeceb;
+  --live:#0a5ca8;
+  --r:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:14px}
+
+/* ---- identity bar ---- */
+.idbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 16px}
+.mach{font-size:26px;font-weight:700;letter-spacing:-.01em;line-height:1}
+.mach small{display:block;font-size:11px;font-weight:500;color:var(--ink3);
+  letter-spacing:.09em;text-transform:uppercase;margin-bottom:3px}
+.grow{flex:1}
+.state{font-size:15px;font-weight:600;color:var(--ink2)}
+.conn{font-size:12px;color:var(--ink3)}
+.conn.off{color:var(--bad);font-weight:600}
+.lang{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.lang button{border:0;background:var(--panel);color:var(--ink2);
+  padding:6px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.lang button.on{background:var(--ink);color:#fff}
+
+/* ---- headline weight ---- */
+.hero{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:22px 20px;margin-top:12px}
+.hero .cap{display:flex;justify-content:space-between;align-items:center;
+  gap:12px;flex-wrap:wrap}
+.cap-l{font-size:12px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink3)}
+.kg{font-size:clamp(58px,15vw,112px);font-weight:700;line-height:.95;
+  letter-spacing:-.03em;margin:10px 0 0}
+.kg .u{font-size:.32em;font-weight:600;color:var(--ink3);margin-left:.16em;
+  letter-spacing:0}
+.kg.live{color:var(--live)}
+.sub{font-size:13px;color:var(--ink3);margin-top:8px}
+
+/* toggle: latched vs live */
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;
+  overflow:hidden}
+.seg button{border:0;background:var(--panel);color:var(--ink2);
+  padding:8px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+  white-space:nowrap}
+.seg button.on{background:var(--ink);color:#fff}
+
+/* ---- counters ---- */
+.cnt{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px}
+.card{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:16px 18px}
+.card .cap-l{margin-bottom:9px}
+.big{font-size:clamp(34px,8vw,52px);font-weight:700;line-height:1;
+  letter-spacing:-.02em}
+.note{font-size:12px;color:var(--ink3);margin-top:7px}
+
+/* ---- target ---- */
+.tgt{margin-top:12px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:9px;padding:12px 17px;font:inherit;font-size:17px;
+  font-weight:600;cursor:pointer;min-width:84px}
+.chip:hover{border-color:var(--ink3)}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.fam{font-size:11px;font-weight:600;letter-spacing:.09em;color:var(--ink3);
+  text-transform:uppercase;margin:14px 0 0}
+
+/* ---- abnormal only ---- */
+.alert{display:none;border-radius:var(--r);padding:15px 18px;margin-top:12px;
+  border:1px solid}
+.alert.show{display:block}
+.alert.warn{background:var(--warnbg);border-color:#e8c98d;color:var(--warn)}
+.alert.bad{background:var(--badbg);border-color:#e8b3b0;color:var(--bad)}
+.alert h3{margin:0 0 5px;font-size:16px;font-weight:700}
+.alert ul{margin:6px 0 0;padding-left:19px;font-size:14px;line-height:1.55}
+.alert .fix{font-size:13px;margin-top:9px;opacity:.9}
+
+footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
+
+@media(min-width:720px){
+  .cnt{grid-template-columns:repeat(3,1fr)}
+  .wrap{padding:18px}
+}
+@media(max-width:400px){
+  .mach{font-size:22px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="idbar">
+    <div class="mach"><small data-t="machine">Máy · Vòi</small>
+      <span id="mach">—</span></div>
+    <div class="grow"></div>
+    <div>
+      <div class="state" id="state">—</div>
+      <div class="conn" id="conn">—</div>
+    </div>
+    <div class="lang">
+      <button id="bvi" class="on" onclick="setLang('vi')">VN</button>
+      <button id="ben" onclick="setLang('en')">EN</button>
+    </div>
+  </div>
+
+  <div id="alert" class="alert"><h3 id="alertTitle"></h3>
+    <ul id="alertList"></ul>
+    <div class="fix" id="alertFix"></div></div>
+
+  <div class="hero">
+    <div class="cap">
+      <span class="cap-l" id="heroCap">Bao vừa đổ</span>
+      <div class="seg">
+        <button id="bLatch" class="on" onclick="setWeightMode('latched')"
+          data-t="latched">Số chốt</button>
+        <button id="bLive" onclick="setWeightMode('live')"
+          data-t="live">Số đang cân</button>
+      </div>
+    </div>
+    <div class="kg" id="kg">—<span class="u">kg</span></div>
+    <div class="sub" id="kgSub">—</div>
+  </div>
+
+  <div class="cnt">
+    <div class="card"><div class="cap-l" data-t="shift">Bao trong ca</div>
+      <div class="big" id="shift">—</div>
+      <div class="note" id="shiftNote">—</div></div>
+    <div class="card"><div class="cap-l" data-t="day">Bao trong ngày</div>
+      <div class="big" id="day">—</div>
+      <div class="note" id="dayNote">—</div></div>
+    <div class="card"><div class="cap-l" data-t="tons">Tấn trong ca</div>
+      <div class="big" id="tons">—</div>
+      <div class="note" id="tonsNote">—</div></div>
+  </div>
+
+  <div class="card tgt">
+    <div class="cap-l" data-t="target">Khối lượng đặt</div>
+    <div class="fam">50 kg</div>
+    <div class="chips" id="chips50"></div>
+    <div class="fam">40 kg</div>
+    <div class="chips" id="chips40"></div>
+  </div>
+
+  <footer id="foot">SP01</footer>
+</div>
+
+<script>
+const T={
+ vi:{machine:'Máy · Vòi',latched:'Số chốt',live:'Số đang cân',
+  shift:'Bao trong ca',day:'Bao trong ngày',tons:'Tấn trong ca',
+  target:'Khối lượng đặt',heroLatch:'Bao vừa đổ',heroLive:'Đang cân',
+  live:'Số đang cân',offline:'MẤT KẾT NỐI',online:'Trực tuyến',
+  waiting:'Chưa có bao nào hoàn tất',blocked:'Máy đang chờ',
+  fault:'Lỗi',fix:'Xử lý: kiểm tra các mục trên, sau đó máy tự tiếp tục.',
+  shiftOf:s=>'Ca '+s+' · đổi ca 0h / 8h / 16h',dayOf:'Tính từ 0h hôm nay',
+  tonsNote:'Cộng dồn trong ca'},
+ en:{machine:'Machine · Spout',latched:'Latched',live:'Live',
+  shift:'Bags this shift',day:'Bags today',tons:'Tonnes this shift',
+  target:'Target weight',heroLatch:'Last bag discharged',heroLive:'Weighing now',
+  offline:'OFFLINE',online:'Online',
+  waiting:'No completed bag yet',blocked:'Machine waiting',
+  fault:'Fault',fix:'Action: clear the items above, then the machine resumes.',
+  shiftOf:s=>'Shift '+s+' · changes at 00:00 / 08:00 / 16:00',
+  dayOf:'Since midnight',tonsNote:'Accumulated this shift'}
+};
+let lang='vi', weightMode='latched', S=null;
+
+function setLang(l){lang=l;
+ bvi.classList.toggle('on',l==='vi');ben.classList.toggle('on',l==='en');
+ document.documentElement.lang=l;
+ document.querySelectorAll('[data-t]').forEach(e=>{
+   const k=e.dataset.t; if(T[l][k]) e.textContent=T[l][k];});
+ if(S)render(S);}
+
+function setWeightMode(m){weightMode=m;
+ bLatch.classList.toggle('on',m==='latched');
+ bLive.classList.toggle('on',m==='live');
+ if(S)render(S);}
+
+function buildChips(){
+ const mk=(host,list)=>{host.innerHTML=list.map(v=>
+  `<button class="chip" data-v="${v}" onclick="pickTarget(${v})">${v.toFixed(1)}</button>`).join('')};
+ mk(chips50,[50.1,50.2,50.3,50.4,50.5,50.6,50.7]);
+ mk(chips40,[40.1,40.2,40.3,40.4,40.5,40.6]);
+}
+async function pickTarget(v){
+ try{await fetch('/api/op/target',{method:'POST',
+   headers:{'Content-Type':'text/plain'},body:'kg='+v});}catch(e){}
+ markTarget(v); refresh();
+}
+function markTarget(v){
+ document.querySelectorAll('.chip').forEach(c=>
+  c.classList.toggle('on',Math.abs(parseFloat(c.dataset.v)-v)<0.001));
+}
+
+function render(s){
+ S=s; const t=T[lang];
+ mach.textContent=s.machine_id+' · '+s.spout_id;
+ state.textContent=s.state_text||s.state;
+ conn.textContent=t.online; conn.classList.remove('off');
+
+ const live = weightMode==='live';
+ heroCap.textContent = live ? t.heroLive : t.heroLatch;
+ const val = live ? s.weight_kg : s.last_bag_kg;
+ kg.classList.toggle('live',live);
+ if(val===null||val===undefined){
+   kg.innerHTML='—<span class="u">kg</span>'; kgSub.textContent=t.waiting;
+ }else{
+   kg.innerHTML=val.toFixed(2)+'<span class="u">kg</span>';
+   kgSub.textContent = live
+     ? (s.target_kg?('→ '+s.target_kg.toFixed(1)+' kg'):'')
+     : (s.last_bag_time||'');
+ }
+
+ shift.textContent=s.shift_bags;
+ shiftNote.textContent=t.shiftOf(s.shift_no);
+ day.textContent=s.day_bags;
+ dayNote.textContent=t.dayOf;
+ tons.textContent=(s.shift_bags*(s.target_kg||0)/1000).toFixed(1);
+ tonsNote.textContent=t.tonsNote;
+ markTarget(s.target_kg);
+
+ // Colour only when something is wrong.
+ const blocks=s.blocks||[];
+ if(s.fault && s.fault!=='NONE'){
+   alert_(true,'bad',t.fault+' · '+s.fault,[s.fault_text||''],t.fix);
+ }else if(blocks.length){
+   alert_(true,'warn',t.blocked,blocks.map(b=>b.text),'');
+ }else alert_(false);
+ foot.textContent='SP01 · '+s.machine_id+' · '+s.spout_id+' · '+(s.fw||'');
+}
+function alert_(show,kind,title,items,fix){
+ const a=document.getElementById('alert');
+ a.className='alert'+(show?' show '+kind:'');
+ if(!show)return;
+ alertTitle.textContent=title;
+ alertList.innerHTML=items.filter(Boolean).map(x=>`<li>${x}</li>`).join('');
+ alertFix.textContent=fix||'';
+}
+function offline(){
+ conn.textContent=T[lang].offline; conn.classList.add('off');
+}
+
+// ---- data ----
+const PREVIEW = location.protocol==='file:';
+let demo={t:0};
+function demoState(){
+ demo.t+=0.4;
+ const filling=(demo.t%14.4)<9;
+ const w=filling?Math.min(50.2,(demo.t%14.4)*6.2):50.2;
+ return {machine_id:'MÁY 3',spout_id:'VÒI 7',state:'COARSE_FILL',
+  state_text:lang==='vi'?'Đang nạp':'Coarse fill',
+  weight_kg:w,last_bag_kg:50.18,last_bag_time:'14:32:07',
+  target_kg:50.2,shift_bags:418,day_bags:1206,shift_no:2,
+  fault:'NONE',blocks:[],fw:'preview'};
+}
+async function refresh(){
+ try{
+  const s = PREVIEW ? demoState()
+    : await (await fetch('/api/state',{cache:'no-store'})).json();
+  render(s);
+ }catch(e){offline();}
+ setTimeout(refresh,400);
+}
+buildChips(); setLang('vi'); refresh();
+</script>
+</body>
+</html>
