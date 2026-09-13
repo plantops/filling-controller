@@ -8,9 +8,11 @@ class Controller {
 public:
     explicit Controller(ControllerConfig config = {}) noexcept;
 
-    [[nodiscard]] ControllerSnapshot tick(std::uint64_t now_us,
-                                          const InputImage& inputs,
-                                          const WeightSnapshot& weight) noexcept;
+    [[nodiscard]] ControllerSnapshot tick(
+        std::uint64_t now_us,
+        const InputImage& inputs,
+        const WeightSnapshot& weight,
+        const PositionSnapshot& position = PositionSnapshot{}) noexcept;
 
     void reset(std::uint64_t now_us = 0) noexcept;
     bool clear_fault(std::uint64_t now_us, const InputImage& inputs) noexcept;
@@ -29,10 +31,18 @@ private:
     bool prev_discharge_ref_b_{false};
     std::uint64_t discharge_ref_a_us_{0};
 
+    bool broken_bag_tracking_{false};
+    float broken_bag_peak_kg_{0.0F};
+    std::uint64_t broken_bag_below_since_us_{0};
+    std::uint32_t broken_bag_last_sequence_{0};
+
     void transition(State next, std::uint64_t now_us) noexcept;
     void fault(Fault code, std::uint64_t now_us) noexcept;
     void reset_discharge_capture(const InputImage& inputs) noexcept;
     void update_discharge_capture(std::uint64_t now_us, const InputImage& inputs) noexcept;
+    void reset_broken_bag_tracking() noexcept;
+    [[nodiscard]] bool broken_bag_detected(std::uint64_t now_us,
+                                           const WeightSnapshot& weight) noexcept;
 
     [[nodiscard]] bool timed_out(std::uint64_t now_us, std::uint64_t timeout_us) const noexcept;
     [[nodiscard]] bool weight_fresh(std::uint64_t now_us, const WeightSnapshot& weight) const noexcept;

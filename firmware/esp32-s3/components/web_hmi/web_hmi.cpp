@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/ip4_addr.h"
 #include "nvs_flash.h"
@@ -46,37 +47,68 @@ constexpr int kEthPhyAddress = 1;
 constexpr int kEthSpiHz = 20 * 1000 * 1000;
 constexpr std::uint32_t kBenchPulseMs = 500;
 
-constexpr char kIndexHtml[] = R"HTML(<!doctype html>
+constexpr char kOpHtml[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SP01 Filling Controller</title>
+<title>SP01 Operator HMI</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:980px;margin:20px auto;padding:0 14px;background:#111;color:#eee}
-h1{font-size:22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
-.card{border:1px solid #555;border-radius:8px;padding:12px}table{width:100%;border-collapse:collapse}td{padding:3px 5px;border-bottom:1px solid #333}
-.on{font-weight:700}.bad{font-weight:700}button,input{font:inherit;padding:7px;margin:3px}small{opacity:.75}.warn{border-color:#a66}
-</style></head><body>
-<h1>SP01 Filling Controller</h1><div id="offline">Connecting / Đang kết nối…</div>
+:root{color-scheme:dark}body{font-family:system-ui,sans-serif;margin:0;background:#101214;color:#eef1f4}.wrap{max-width:820px;margin:auto;padding:18px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px}.card{background:#181c20;border:1px solid #343b42;border-radius:12px;padding:16px}.k{font-size:12px;opacity:.65;text-transform:uppercase}.v{font-size:26px;font-weight:700;margin-top:5px}.ok{color:#9be28f}.bad{color:#ff9b9b}.muted{opacity:.65}a{color:#9fc7ff;text-decoration:none}.status{font-weight:700}
+</style></head><body><div class="wrap">
+<div class="top"><div><h2 style="margin:0">SP01 Filling Controller</h2><div class="muted">Operator view</div></div><a href="/dev">DEV MODE →</a></div>
+<div id="conn" class="status">Connecting…</div>
 <div class="grid">
-<div class="card"><b>Status / Trạng thái</b><table><tr><td>Mode</td><td id="mode">-</td></tr><tr><td>State</td><td id="state">-</td></tr><tr><td>Fault</td><td id="fault">-</td></tr><tr><td>Cycle</td><td id="cycle">-</td></tr><tr><td>Weight / Khối lượng</td><td id="weight">-</td></tr><tr><td>Stable</td><td id="stable">-</td></tr></table></div>
-<div class="card"><b>I/O</b><table id="io"></table></div>
-<div class="card warn" id="bench" style="display:none"><b>G2 BENCH DO TEST</b><p><small>MACHINE / SOLENOID / CONTACTOR MUST BE DISCONNECTED. One output only, automatic OFF after 500 ms.</small></p><div id="dobtn"></div><button onclick="benchOff()">ALL OFF</button></div>
-<div class="card"><b>Calibration / Hiệu chuẩn</b><p>Service ready: <b id="svc">NO</b></p><button onclick="zero()">SET ZERO</button><br><button onclick="check(20)">CHECK 20 kg</button><span id="c20"></span><br><button onclick="span50()">SET SPAN 50 kg</button><br><button onclick="check(50)">VERIFY 50 kg</button><span id="c50"></span><p><small>Calibration writes require machine stopped, fill switch OFF, all outputs safe, fresh stable weight, calibration writes enabled, and service token.</small></p></div>
-<div class="card"><b>Diagnostics / Chẩn đoán</b><pre id="diag">-</pre></div>
+<div class="card"><div class="k">State</div><div id="state" class="v">-</div></div>
+<div class="card"><div class="k">Weight</div><div id="weight" class="v">-</div></div>
+<div class="card"><div class="k">Bag</div><div id="bag" class="v">-</div></div>
+<div class="card"><div class="k">Machine ready</div><div id="ready" class="v">-</div></div>
+<div class="card"><div class="k">Fill</div><div id="fill" class="v">-</div></div>
+<div class="card"><div class="k">Fault</div><div id="fault" class="v">-</div></div>
+</div></div>
+<script>
+function onBit(v,n){return !!(v&(1<<n))}
+async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;const s=await r.json();conn.textContent='LIVE · '+s.mode+' · cycle '+s.cycle_id;conn.className='status ok';state.textContent=s.state;weight.textContent=s.weight.toFixed(2)+' kg';bag.textContent=s.disposition;const perm=onBit(s.di,0)&&onBit(s.di,1)&&onBit(s.di,2)&&onBit(s.di,3);ready.textContent=perm?'READY':'WAIT';ready.className='v '+(perm?'ok':'');const filling=(s.desired_do&(1<<6))!==0;fill.textContent=filling?'FILLING':'IDLE';fault.textContent=s.fault;fault.className='v '+(s.fault==='NONE'?'ok':'bad');}catch(e){conn.textContent='OFFLINE';conn.className='status bad'}setTimeout(poll,350)}poll();
+</script></body></html>)HTML";
+
+constexpr char kDevHtml[] = R"HTML(<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SP01 DEV HMI</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#0d1013;color:#e9edf1}.wrap{max-width:1500px;margin:auto;padding:12px}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.summary{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid #3a434c;border-radius:999px;padding:6px 10px;background:#161b20}.grid3{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:10px;margin-top:10px}.card{border:1px solid #343c44;border-radius:10px;background:#15191e;padding:12px}.card h3{font-size:14px;margin:0 0 10px;color:#cfd6dc}.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #252c32}.row:last-child{border-bottom:0}.lamp{min-width:48px;text-align:center;border-radius:6px;padding:3px 6px;background:#252b31;color:#aeb6bd;font-size:12px;font-weight:700}.lamp.on{background:#1e5a34;color:#b9ffc9}.lamp.warn{background:#6b4b12;color:#ffe0a0}.lamp.bad{background:#6d2525;color:#ffc1c1}.flow{display:flex;gap:5px;overflow:auto;padding:4px 0}.st{border:1px solid #3a424a;border-radius:7px;padding:7px 9px;white-space:nowrap;font-size:12px;opacity:.55}.st.active{opacity:1;border-color:#9fc7ff;background:#183149;color:#d8ecff}.branch{margin-top:7px;font-size:12px;opacity:.75}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.small{font-size:12px;opacity:.7}.big{font-size:22px;font-weight:700}.ok{color:#9be28f}.badText{color:#ff9b9b}.warnText{color:#ffd28a}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}button{font:inherit;border:1px solid #4a555f;background:#20262c;color:#eef;border-radius:7px;padding:7px 10px;cursor:pointer}button:hover{background:#29313a}a{color:#9fc7ff;text-decoration:none}@media(max-width:980px){.grid3,.two{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+<div class="head"><div><h2 style="margin:0">SP01 · DEV MODE</h2><div class="small">Core controller design / debug / tuning. Input source = REAL HW; this page does not force raw pins.</div></div><div><button id="freeze" onclick="toggleFreeze()">Freeze</button> <a href="/">OP MODE →</a></div></div>
+<div class="summary" style="margin-top:10px"><span class="pill">Conn <b id="conn">…</b></span><span class="pill">Mode <b id="mode">-</b></span><span class="pill">State <b id="state">-</b></span><span class="pill">Cycle <b id="cycle">-</b></span><span class="pill">Bag <b id="disp">-</b></span><span class="pill">Weight <b id="weight">-</b></span><span class="pill">Fault <b id="fault">-</b></span></div>
+
+<div class="grid3">
+<div class="card"><h3>A · ACTUAL HW INPUTS</h3><div id="inputs"></div><div class="small" style="margin-top:8px">Semantic DI state read from board after configured polarity. No GPIO/register detail here.</div></div>
+<div class="card"><h3>B · CONTROLLER CORE</h3><div class="row"><span>Interlocks ready</span><span id="perm" class="lamp">-</span></div><div class="row"><span>Weight quality</span><span id="wq" class="lamp">-</span></div><div class="row"><span>Weight stable</span><span id="ws" class="lamp">-</span></div><div class="row"><span>Broken bag detected</span><span id="broken" class="lamp">-</span></div><div class="row"><span>Reject latched</span><span id="reject" class="lamp">-</span></div><div class="row"><span>Next transition</span><b id="next">-</b></div><div class="row"><span>Block / wait reason</span><b id="block">-</b></div><div class="row"><span>Core output map</span><b id="corecheck">-</b></div></div>
+<div class="card"><h3>C · OUTPUTS</h3><div id="outputs"></div><div class="small" style="margin-top:8px"><b>Desired</b> = FSM request. <b>Commanded</b> = last board-adapter command. No independent physical DO feedback is claimed.</div></div>
+</div>
+
+<div class="card" style="margin-top:10px"><h3>D · EXECUTABLE STATE FLOW</h3><div id="flow" class="flow"></div><div class="branch"><b>GOOD:</b> SETTLE → WAIT_DISCHARGE → PUSH → COMPLETE &nbsp; | &nbsp; <b>REJECT:</b> COARSE/FINE → REJECT_WAIT → PUSH → COMPLETE</div></div>
+
+<div class="two">
+<div class="card"><h3>E · SLOW MANUAL TEST</h3><div class="small">Toggle real semantic inputs slowly and watch the controller advance. Do not test raw pins individually here.</div><ol style="margin:8px 0 0 18px;padding:0"><li>Permissives: feeder + downstream + motor + initiative.</li><li>Cycle fill-position OFF → ON.</li><li>Bag present ON.</li><li>Watch BAG_ACQUIRE → BAG_VERIFY → TARE_READY.</li><li>Dummy weight drives COARSE_FILL → FINE_FILL → CUTOFF → SETTLE.</li><li>GOOD path: exercise ref A then ref B; verify PUSH only after discharge timing.</li><li>REJECT path remains dependent on the commissioned reject-window authority; do not invent a 210° raw DI.</li></ol></div>
+<div class="card"><h3>F · EVENT TIMELINE</h3><div id="timeline" class="mono small">waiting…</div></div>
+</div>
+
+<div class="two">
+<div class="card"><h3>WEIGHT / REJECT</h3><div class="row"><span>Net</span><b id="wnet">-</b></div><div class="row"><span>Sample sequence</span><b id="wseq">-</b></div><div class="row"><span>Sample age</span><b id="wage">-</b></div><div class="row"><span>Broken peak</span><b id="bpeak">-</b></div><div class="row"><span>Broken weight</span><b id="bweight">-</b></div></div>
+<div class="card"><h3>DISCHARGE TIMING</h3><div class="row"><span>Ref A→B interval</span><b id="refint">-</b></div><div class="row"><span>Push due (controller us)</span><b id="due">-</b></div><div class="row"><span>Desired mask</span><b id="dmask" class="mono">-</b></div><div class="row"><span>Commanded mask</span><b id="cmask" class="mono">-</b></div></div>
+</div>
 </div>
 <script>
-let last=null,token=sessionStorage.getItem('sp01token')||'';
-function bits(v){let s='';for(let i=0;i<8;i++)s+=`<tr><td>DI${i+1}</td><td class="${v.di&(1<<i)?'on':''}">${v.di&(1<<i)?'ON':'OFF'}</td><td>DO${i+1}</td><td class="${v.do&(1<<i)?'on':''}">${v.do&(1<<i)?'ON':'OFF'}</td></tr>`;return s}
-function makeDoButtons(){let s='';for(let i=1;i<=8;i++)s+=`<button onclick="benchDo(${i})">PULSE DO${i}</button>`;dobtn.innerHTML=s}
-async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;last=await r.json();offline.textContent='LIVE';mode.textContent=last.mode;state.textContent=last.state;fault.textContent=last.fault;cycle.textContent=last.cycle;weight.textContent=last.weight.toFixed(3)+' kg';stable.textContent=last.stable?'YES':'NO';svc.textContent=last.service_ready?'YES':'NO';io.innerHTML=bits(last);bench.style.display=last.bench_do_available?'block':'none';diag.textContent=`quality=${last.quality}\nTLB polls=${last.tlb_polls}\nTLB errors=${last.tlb_errors}\nTLB last=${last.tlb_last_error}`;}catch(e){offline.textContent='OFFLINE / MẤT KẾT NỐI'}setTimeout(poll,250)}
-function auth(){if(!token){token=prompt('Service token')||'';sessionStorage.setItem('sp01token',token)}return {'X-Service-Token':token}}
-async function post(path,body=''){const r=await fetch(path,{method:'POST',headers:{...auth(),'Content-Type':'text/plain'},body});const t=await r.text();alert(r.status+' '+t);if(r.status===401||r.status===403){token='';sessionStorage.removeItem('sp01token')}}
-async function benchPost(body){const r=await fetch('/api/bench/do',{method:'POST',headers:{'Content-Type':'text/plain'},body});const t=await r.text();if(!r.ok)alert(r.status+' '+t)}
-function benchDo(n){if(confirm(`Pulse DO${n} for 500 ms? Machine wiring MUST be disconnected.`))benchPost(String(n))}
-function benchOff(){benchPost('0')}
-function zero(){post('/api/cal/zero')}
-function span50(){post('/api/cal/span','50.000')}
-function check(k){if(!last)return;document.getElementById(k===20?'c20':'c50').textContent='  reading '+last.weight.toFixed(3)+' kg, error '+(last.weight-k).toFixed(3)+' kg'}
-makeDoButtons();poll();
+const DI=['feeder_running','downstream_ready','machine_motor_running','initiative','fill_position','bag_present','discharge_ref_a','discharge_ref_b'];
+const DO=['scanner.down','bag_detect_air','bag.push','dosing.valve_a','dosing.valve_b','dosing.valve_c','filling.motor','spout.aeration'];
+const STATES=['WAIT_PERMISSIVE','WAIT_FILL_POSITION','BAG_ACQUIRE','BAG_VERIFY','TARE_READY','COARSE_FILL','FINE_FILL','CUTOFF','SETTLE','REJECT_WAIT','WAIT_DISCHARGE','PUSH','COMPLETE','FAULT'];
+let frozen=false,last=null,lastState='',events=[];
+function bit(v,n){return !!(v&(1<<n))}
+function lamp(v){return `<span class="lamp ${v?'on':''}">${v?'ON':'OFF'}</span>`}
+function expectedMask(s){switch(s.state){case'BAG_ACQUIRE':case'BAG_VERIFY':case'TARE_READY':return 0x03;case'COARSE_FILL':return 0xfb;case'FINE_FILL':return 0xeb;case'CUTOFF':case'SETTLE':case'REJECT_WAIT':case'WAIT_DISCHARGE':return 0x03;case'PUSH':return s.mode==='AUTO'?0x04:0;default:return 0}}
+function readiness(s){if(s.mode==='AUTO')return bit(s.di,0)&&bit(s.di,1)&&bit(s.di,2)&&bit(s.di,3);return bit(s.di,0)&&bit(s.di,3)}
+function nextInfo(s){let n='-',b='-';switch(s.state){case'WAIT_PERMISSIVE':n=s.mode==='AUTO'?'WAIT_FILL_POSITION':'BAG_ACQUIRE';b=readiness(s)?'ready to transition':'waiting permissives';break;case'WAIT_FILL_POSITION':n='BAG_ACQUIRE';b='waiting fill_position OFF → ON edge';break;case'BAG_ACQUIRE':n='BAG_VERIFY';b=bit(s.di,5)?'bag detected':'waiting bag_present';break;case'BAG_VERIFY':n='TARE_READY';b='verify bag';break;case'TARE_READY':n='COARSE_FILL';b=s.quality===1?'weight ready':'waiting healthy fresh weight';break;case'COARSE_FILL':n='FINE_FILL or REJECT_WAIT';b='weight threshold / broken-bag watch';break;case'FINE_FILL':n='CUTOFF or REJECT_WAIT';b='cutoff threshold / broken-bag watch';break;case'CUTOFF':n='SETTLE';b='immediate transition';break;case'SETTLE':n=s.mode==='AUTO'?'WAIT_DISCHARGE':'COMPLETE';b=s.stable?'stable':'waiting stable weight';break;case'REJECT_WAIT':n='PUSH';b='waiting commissioned reject-window authority';break;case'WAIT_DISCHARGE':n='PUSH';b=s.discharge_due_us?'waiting due time':'waiting ref A → ref B';break;case'PUSH':n='COMPLETE';b='push pulse duration';break;case'COMPLETE':n=s.mode==='AUTO'?'WAIT_FILL_POSITION / WAIT_PERMISSIVE':'WAIT_PERMISSIVE';b='cycle complete';break;case'FAULT':n='clear fault';b=s.fault;break}return[n,b]}
+function renderFlow(state){flow.innerHTML=STATES.map(x=>`<span class="st ${x===state?'active':''}">${x}</span>`).join('')}
+function render(s){last=s;conn.textContent='LIVE';conn.className='ok';mode.textContent=s.mode;state.textContent=s.state;cycle.textContent=s.cycle_id;disp.textContent=s.disposition;weight.textContent=s.weight.toFixed(2)+' kg';fault.textContent=s.fault;fault.className=s.fault==='NONE'?'ok':'badText';inputs.innerHTML=DI.map((n,i)=>`<div class="row"><span>DI${i+1} · ${n}</span>${lamp(bit(s.di,i))}</div>`).join('');outputs.innerHTML=DO.map((n,i)=>{const d=bit(s.desired_do,i),c=bit(s.commanded_do,i);return `<div class="row"><span>DO${i+1} · ${n}</span><span><span class="lamp ${d?'warn':''}">D:${d?'ON':'OFF'}</span> <span class="lamp ${c?'on':''}">C:${c?'ON':'OFF'}</span></span></div>`}).join('');const p=readiness(s);perm.textContent=p?'YES':'NO';perm.className='lamp '+(p?'on':'');wq.textContent=['UNKNOWN','GOOD','STALE','FAULT'][s.quality]||s.quality;wq.className='lamp '+(s.quality===1?'on':s.quality===3?'bad':'warn');ws.textContent=s.stable?'YES':'NO';ws.className='lamp '+(s.stable?'on':'');const br=s.broken_bag_detected_us>0;broken.textContent=br?'YES':'NO';broken.className='lamp '+(br?'bad':'');const rj=s.disposition==='REJECT';reject.textContent=rj?'YES':'NO';reject.className='lamp '+(rj?'bad':'');const ni=nextInfo(s);next.textContent=ni[0];block.textContent=ni[1];const exp=expectedMask(s),mapok=(s.desired_do&255)===exp;corecheck.textContent=mapok?'OK':'MISMATCH expected 0x'+exp.toString(16).padStart(2,'0');corecheck.className=mapok?'ok':'badText';renderFlow(s.state);wnet.textContent=s.weight.toFixed(3)+' kg';wseq.textContent=s.weight_sequence;wage.textContent=s.weight_age_ms+' ms';bpeak.textContent=s.broken_bag_peak_kg.toFixed(3)+' kg';bweight.textContent=s.broken_bag_weight_kg.toFixed(3)+' kg';refint.textContent=s.discharge_ref_interval_us+' us';due.textContent=s.discharge_due_us;dmask.textContent='0x'+(s.desired_do&255).toString(16).padStart(2,'0');cmask.textContent='0x'+(s.commanded_do&255).toString(16).padStart(2,'0');if(s.state!==lastState){const t=new Date().toLocaleTimeString();events.unshift(`${t}  ${lastState||'BOOT'} → ${s.state}  fault=${s.fault} bag=${s.disposition}`);events=events.slice(0,12);timeline.textContent=events.join('\n');lastState=s.state}}
+function toggleFreeze(){frozen=!frozen;freeze.textContent=frozen?'Resume':'Freeze';if(!frozen&&last)render(last)}
+async function poll(){if(!frozen){try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw 0;render(await r.json())}catch(e){conn.textContent='OFFLINE';conn.className='badText'}}setTimeout(poll,200)}poll();
 </script></body></html>)HTML";
 
 std::uint8_t pack_inputs(const InputImage& in) noexcept {
@@ -104,22 +136,41 @@ esp_err_t send_text(httpd_req_t* req, const char* text, const char* type = "text
 }
 
 esp_err_t root_handler(httpd_req_t* req) noexcept {
-    return send_text(req, kIndexHtml, "text/html");
+    return send_text(req, kOpHtml, "text/html");
+}
+
+esp_err_t dev_handler(httpd_req_t* req) noexcept {
+    return send_text(req, kDevHtml, "text/html");
 }
 
 esp_err_t state_handler(httpd_req_t* req) noexcept {
     if (!g_snapshot_fn) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
     HmiSnapshot s{};
     if (!g_snapshot_fn(s)) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "status unavailable");
-    char json[704]{};
+    const auto now_us = static_cast<std::uint64_t>(esp_timer_get_time());
+    const std::uint64_t age_ms = (s.weight.sample_time_us <= now_us)
+                                     ? (now_us - s.weight.sample_time_us) / 1000ULL
+                                     : 0ULL;
+    char json[1536]{};
     std::snprintf(json, sizeof(json),
-                  "{\"mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\",\"cycle\":%" PRIu32 ",\"weight\":%.3f,"
-                  "\"stable\":%s,\"quality\":%u,\"di\":%u,\"do\":%u,\"service_ready\":%s,\"bench_do_available\":%s,"
+                  "{\"mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\",\"disposition\":\"%s\","
+                  "\"cycle\":%" PRIu32 ",\"cycle_id\":%" PRIu32 ",\"weight\":%.3f,\"stable\":%s,\"quality\":%u,"
+                  "\"di\":%u,\"do\":%u,\"desired_do\":%u,\"commanded_do\":%u,"
+                  "\"broken_bag_detected_us\":%" PRIu64 ",\"broken_bag_peak_kg\":%.3f,\"broken_bag_weight_kg\":%.3f,"
+                  "\"discharge_ref_interval_us\":%" PRIu64 ",\"discharge_due_us\":%" PRIu64 ","
+                  "\"weight_sequence\":%" PRIu32 ",\"weight_sample_time_us\":%" PRIu64 ",\"weight_age_ms\":%" PRIu64 ","
+                  "\"service_ready\":%s,\"bench_do_available\":%s,"
                   "\"tlb_polls\":%" PRIu32 ",\"tlb_errors\":%" PRIu32 ",\"tlb_last_error\":%d}",
                   mode_name(s.controller.mode), state_name(s.controller.state), fault_name(s.controller.fault),
-                  s.controller.cycle_id, static_cast<double>(s.weight.net_kg),
-                  s.weight.stable ? "true" : "false", static_cast<unsigned>(s.weight.quality),
-                  static_cast<unsigned>(pack_inputs(s.inputs)), static_cast<unsigned>(pack_outputs(s.controller.outputs)),
+                  disposition_name(s.controller.disposition), s.controller.cycle_id, s.controller.cycle_id,
+                  static_cast<double>(s.weight.net_kg), s.weight.stable ? "true" : "false",
+                  static_cast<unsigned>(s.weight.quality), static_cast<unsigned>(pack_inputs(s.inputs)),
+                  static_cast<unsigned>(pack_outputs(s.commanded_outputs)),
+                  static_cast<unsigned>(pack_outputs(s.controller.outputs)),
+                  static_cast<unsigned>(pack_outputs(s.commanded_outputs)),
+                  s.controller.broken_bag_detected_us, static_cast<double>(s.controller.broken_bag_peak_kg),
+                  static_cast<double>(s.controller.broken_bag_weight_kg), s.controller.discharge_ref_interval_us,
+                  s.controller.discharge_due_us, s.weight.sequence, s.weight.sample_time_us, age_ms,
                   s.service_ready ? "true" : "false", g_config.bench_do_enabled ? "true" : "false",
                   s.tlb.polls_ok, s.tlb.comm_errors, static_cast<int>(s.tlb.last_error));
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -164,6 +215,9 @@ esp_err_t bench_do_handler(httpd_req_t* req) noexcept {
     if (!g_config.bench_do_enabled || !g_bench_do_pulse_fn || !g_bench_do_off_fn) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "bench DO test disabled");
     }
+    if (!token_ok(req)) {
+        return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "bad service token");
+    }
     char body[16]{};
     const int n = httpd_req_recv(req, body, sizeof(body) - 1);
     if (n <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "channel required");
@@ -207,15 +261,18 @@ esp_err_t start_http() noexcept {
     cfg.stack_size = 6144;
     cfg.max_open_sockets = 4;
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 8;
     esp_err_t err = httpd_start(&g_server, &cfg);
     if (err != ESP_OK) return err;
 
     httpd_uri_t root{}; root.uri = "/"; root.method = HTTP_GET; root.handler = root_handler;
+    httpd_uri_t dev{}; dev.uri = "/dev"; dev.method = HTTP_GET; dev.handler = dev_handler;
     httpd_uri_t state{}; state.uri = "/api/state"; state.method = HTTP_GET; state.handler = state_handler;
     httpd_uri_t zero{}; zero.uri = "/api/cal/zero"; zero.method = HTTP_POST; zero.handler = zero_handler;
     httpd_uri_t span{}; span.uri = "/api/cal/span"; span.method = HTTP_POST; span.handler = span_handler;
     httpd_uri_t bench{}; bench.uri = "/api/bench/do"; bench.method = HTTP_POST; bench.handler = bench_do_handler;
     httpd_register_uri_handler(g_server, &root);
+    httpd_register_uri_handler(g_server, &dev);
     httpd_register_uri_handler(g_server, &state);
     httpd_register_uri_handler(g_server, &zero);
     httpd_register_uri_handler(g_server, &span);
@@ -329,7 +386,7 @@ esp_err_t web_hmi_start(const WebHmiConfig& config,
     const esp_err_t wifi_err = start_wifi_optional();
     if (wifi_err != ESP_OK) ESP_LOGW(kTag, "Wi-Fi disabled: %s", esp_err_to_name(wifi_err));
 
-    ESP_LOGI(kTag, "HMI HTTP server ready; Ethernet primary, Wi-Fi optional STA");
+    ESP_LOGI(kTag, "HMI HTTP server ready; / operator, /dev engineering; Ethernet primary, Wi-Fi optional STA");
     return ESP_OK;
 }
 
