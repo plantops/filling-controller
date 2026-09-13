@@ -3,7 +3,7 @@ name: fw
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'diag/sp01-g2-g9']
+    branches: [main, 'diag/sp01-g2-g9', 'feat/**']
     paths:
       - 'firmware/**'
       - 'tools/**'
