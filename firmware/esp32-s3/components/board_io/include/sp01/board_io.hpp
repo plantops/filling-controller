@@ -18,6 +18,10 @@ public:
     esp_err_t commit_outputs(const OutputImage& image) noexcept;
     esp_err_t force_safe() noexcept;
 
+    // Semantic DO image corresponding to the last successful TCA9554 write.
+    // This is commanded output state, not field-actuator feedback.
+    OutputImage last_commanded_outputs() const noexcept;
+
 private:
     std::uint8_t di_invert_mask_{0};
     std::uint8_t do_invert_mask_{0};

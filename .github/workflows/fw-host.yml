@@ -3,29 +3,37 @@ name: fw
 on:
   workflow_dispatch:
   push:
-    branches: [main, fw-sp01-v0.1]
+    branches: [main, 'diag/sp01-g2-g9']
     paths:
       - 'firmware/**'
+      - 'tools/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
       - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
+      - 'docs/GATE_EXECUTION_PLAN.md'
       - '.github/workflows/fw-host.yml'
   pull_request:
     paths:
       - 'firmware/**'
+      - 'tools/**'
       - 'VERSION'
       - 'docs/ONBOARDING.md'
       - 'docs/INSTALL_ESP_IDF.md'
       - 'docs/BOARD_TERMINALS.md'
       - 'docs/assets/BOARD_TERMINALS.svg'
       - 'docs/FIRST_BOARD_CHECKLIST.md'
+      - 'docs/GATE_EXECUTION_PLAN.md'
       - '.github/workflows/fw-host.yml'
 
+concurrency:
+  group: fw-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   linux-amd64:
@@ -47,21 +55,41 @@ jobs:
           name: sp01-host-linux-amd64-${{ github.sha }}
           path: build/host/sp01_host
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   esp32-s3:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build ESP32-S3 firmware with ESP-IDF v5.5.5
+        id: idfbuild
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
 
+      - name: Publish build errors as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          LOG="$GITHUB_WORKSPACE/idf_build.log"
+          [ -f "$LOG" ] || { echo "no build log produced"; exit 0; }
+          ERRS=$(grep -nE "error:|Error |CMake Error|undefined reference|fatal error" "$LOG" | head -40 || true)
+          TAIL=$(tail -n 60 "$LOG")
+          BODY=$(printf 'ESP32-S3 build failed on run %s.\n\n### Errors\n```\n%s\n```\n\n### Log tail\n```\n%s\n```\n' \
+            "$GITHUB_RUN_NUMBER" "$ERRS" "$TAIL")
+          jq -n --arg b "$BODY" '{body:$b}' > /tmp/comment.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -d @/tmp/comment.json | head -c 300
+
       - name: Assemble ESP32 flash bundle
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -73,7 +101,15 @@ jobs:
           cp "$SRC/partition_table/partition-table.bin" "$DST/partition_table/"
           find "$SRC" -maxdepth 1 -type f -name '*.bin' -exec cp {} "$DST/" \;
 
-          if [ -f "$SRC/flash_args" ]; then cp "$SRC/flash_args" "$DST/"; fi
+          if [ -f "$SRC/flash_args" ]; then
+            cp "$SRC/flash_args" "$DST/flash_args_legacy"
+            sed -e 's/--flash_mode/--flash-mode/g' \
+                -e 's/--flash_freq/--flash-freq/g' \
+                -e 's/--flash_size/--flash-size/g' \
+                "$SRC/flash_args" > "$DST/flash_args"
+          fi
+          cp tools/flash.ps1 tools/flash.sh "$DST/"
+          chmod +x "$DST/flash.sh"
           if [ -f "$SRC/flasher_args.json" ]; then cp "$SRC/flasher_args.json" "$DST/"; fi
           if [ -f "$SRC/project_description.json" ]; then cp "$SRC/project_description.json" "$DST/"; fi
 
@@ -83,9 +119,12 @@ jobs:
           cp docs/BOARD_TERMINALS.md "$DST/BOARD_TERMINALS.md"
           cp docs/assets/BOARD_TERMINALS.svg "$DST/assets/BOARD_TERMINALS.svg"
           cp docs/FIRST_BOARD_CHECKLIST.md "$DST/FIRST_BOARD_CHECKLIST.md"
+          cp docs/GATE_EXECUTION_PLAN.md "$DST/GATE_EXECUTION_PLAN.md"
           printf '%s\n' "$GITHUB_SHA" > "$DST/GIT_SHA"
+          printf '%s\n' 'SP01 FIELD PROTOTYPE SHADOW' > "$DST/PROTOTYPE_MODE.txt"
+          printf '%s\n' 'Dummy WeightSnapshot enabled; normal process DO held safe OFF; real TLB485 deferred.' >> "$DST/PROTOTYPE_MODE.txt"
           printf '%s\n' 'ESP32-S3 / ESP-IDF v5.5.5 GitHub Actions build.' > "$DST/BUILD_INFO.txt"
-          printf '%s\n' 'START WITH ONBOARDING.md. Developers: see INSTALL_ESP_IDF.md. Machine actuators must remain disconnected for first flash/G1.' >> "$DST/BUILD_INFO.txt"
+          printf '%s\n' 'FAST FLASH: PowerShell -> .\flash.ps1 (auto-detects COM3/single serial port).' >> "$DST/BUILD_INFO.txt"
 
           echo 'Flash bundle:'
           find "$DST" -maxdepth 2 -type f -print | sort
@@ -94,7 +133,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: sp01-esp32-s3-${{ github.sha }}
+          name: sp01-field-prototype
           path: dist/esp32-s3
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14

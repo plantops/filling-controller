@@ -365,7 +365,28 @@ Open terminal in the extracted artifact folder.
 Windows:
 
 ```powershell
-python -m esptool --chip esp32s3 -p COM6 write_flash @flash_args
+python -m esptool --chip esp32s3 -p COM6 write_flash "@flash_args"
+```
+
+**The quotes are required on PowerShell.** `@` is PowerShell's splatting
+operator, so an unquoted `@flash_args` expands to an undefined variable and is
+dropped before esptool ever sees it. esptool then connects, configures the
+flash, resets the chip and exits reporting success — having written nothing.
+Verified on Windows 11 / esptool 5.4.0, 2026-09-10; this silent no-op cost a
+full day of bring-up.
+
+A real write prints `Writing at 0x...` progress and a `Wrote N bytes` line for
+each region. If those lines are absent, nothing was flashed.
+
+If esptool rejects the underscore options inside `flash_args`, write the three
+regions explicitly:
+
+```powershell
+python -m esptool --chip esp32s3 -p COM6 --baud 460800 write-flash `
+  --flash-mode dio --flash-freq 40m --flash-size 16MB `
+  0x0     bootloader\bootloader.bin `
+  0x8000  partition_table\partition-table.bin `
+  0x10000 sp01_filling_controller.bin
 ```
 
 Linux:
@@ -375,6 +396,20 @@ python -m esptool --chip esp32s3 -p /dev/ttyACM0 write_flash @flash_args
 ```
 
 Use the real detected port.
+
+### Always confirm which image is running
+
+A successful flash report is not evidence that the application partition
+changed. After every flash, capture the boot log and compare the reported
+`App version` against the `GIT_SHA` file in the bundle:
+
+```powershell
+python tools\g1_usb_probe.py --port COM6 --seconds 30
+Get-Content .\GIT_SHA
+```
+
+If they do not match, the flash did not land. Fix that before interpreting any
+other test result. See `docs/G1_REMOTE_BRINGUP.md`.
 
 If download does not start:
 

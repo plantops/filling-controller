@@ -11,6 +11,7 @@ namespace sp01 {
 struct HmiSnapshot {
     ControllerSnapshot controller{};
     InputImage inputs{};
+    OutputImage commanded_outputs{};
     WeightSnapshot weight{};
     Tlb485Diagnostics tlb{};
     bool service_ready{false};
