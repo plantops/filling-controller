@@ -369,6 +369,10 @@ esp_err_t inject_handler(httpd_req_t* req) {
     if (field(body, "deg", v, sizeof(v)) && g_cb.set_manual_angle != nullptr) {
         g_cb.set_manual_angle(std::strtof(v, nullptr));
     }
+    if (field(body, "reset", v, sizeof(v)) && g_cb.reset_controller != nullptr) {
+        g_cb.reset_controller();
+        return httpd_resp_sendstr(req, "ok");
+    }
     if (field(body, "clear", v, sizeof(v)) && g_cb.clear_fault != nullptr) {
         if (!g_cb.clear_fault()) {
             httpd_resp_set_status(req, "409 Conflict");
