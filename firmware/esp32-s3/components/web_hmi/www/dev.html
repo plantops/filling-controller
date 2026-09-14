@@ -1,14 +1,445 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>SP01 DEV</title>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SP01 · DEV</title>
 <style>
-:root{--bg:#eceef0;--panel:#fff;--line:#d3d7db;--ink:#1c2024;--ink2:#5c646c;--ink3:#868e96;--warn:#b26a00;--warnbg:#fdf3e3;--bad:#a52020;--badbg:#fbeceb;--live:#0a5ca8;--r:10px}*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}.wrap{max-width:1180px;margin:0 auto;padding:14px}.idbar,.card,.ctx{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}.idbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px}.mach{font-size:26px;font-weight:700;line-height:1}.mach small,.cap{display:block;font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.09em;text-transform:uppercase;margin-bottom:4px}.grow{flex:1}.state{font-size:15px;font-weight:600;color:var(--ink2)}.conn{font-size:12px;color:var(--ink3)}.conn.off{color:var(--bad);font-weight:600}.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:9px;padding:8px 13px;font:inherit;font-size:13px;font-weight:600;text-decoration:none}.ctx{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:10px 16px;margin-top:12px;font-size:13px;color:var(--ink2)}.ctx b{color:var(--ink)}.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}.card{padding:16px 18px}.row{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid #edf0f2;font-size:13px}.row:last-child{border:0}.lamp{min-width:64px;text-align:center;border:1px solid var(--line);border-radius:7px;padding:3px 7px;color:var(--ink2);font-size:12px;font-weight:600}.lamp.on{border-color:var(--live);color:var(--live);background:#eef4fb}.lamp.warn{border-color:#e8c98d;color:var(--warn);background:var(--warnbg)}.lamp.bad{border-color:#e8b3b0;color:var(--bad);background:var(--badbg)}.flow{display:flex;gap:6px;overflow:auto}.st{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:11px;color:var(--ink3);white-space:nowrap}.st.active{background:var(--ink);border-color:var(--ink);color:#fff}.timeline{height:150px;overflow:auto;font:12px ui-monospace,monospace}.ev{display:grid;grid-template-columns:82px 110px 1fr;gap:8px;padding:5px 0;border-bottom:1px solid #edf0f2}.ev b{font-weight:600}.muted{color:var(--ink3)}.shadow{color:var(--warn);font-weight:700}footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}@media(min-width:720px){.wrap{padding:18px}}@media(max-width:900px){.grid{grid-template-columns:1fr}}
-</style></head><body><div class="wrap">
-<div class="idbar"><div class="mach"><small>Máy · Vòi · DEV</small><span>SP01</span></div><div class="grow"></div><div><div class="state" id="state">—</div><div class="conn" id="conn">Connecting</div></div><a class="btn" href="/">OP MODE</a></div>
-<div class="ctx"><span>Mode <b id="mode">—</b></span><span>Cycle <b id="cycle">—</b></span><span>Bag <b id="bag">—</b></span><span>Weight <b id="weight">—</b></span><span id="shadow" class="shadow"></span></div>
-<div class="grid"><div class="card"><span class="cap">Inputs actual</span><div id="di"></div></div><div class="card"><span class="cap">Controller core</span><div id="core"></div></div><div class="card"><span class="cap">Outputs · desired / commanded</span><div id="do"></div></div></div>
-<div class="card" style="margin-top:12px"><span class="cap">State flow</span><div id="flow" class="flow"></div></div>
-<div class="card" style="margin-top:12px"><span class="cap">Event timeline · browser session</span><div id="timeline" class="timeline"><div class="muted">Waiting for changes…</div></div></div>
-<footer id="foot">SP01 DEV</footer></div>
+:root{
+  --bg:#eceef0; --panel:#fff; --line:#d3d7db;
+  --ink:#1c2024; --ink2:#5c646c; --ink3:#868e96;
+  --warn:#b26a00; --warnbg:#fdf3e3;
+  --bad:#a52020;  --badbg:#fbeceb;
+  --ok:#1c6b3c;   --okbg:#eaf5ee;
+  --live:#0a5ca8; --r:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:14px}
+
+/* the banner is the whole point: you must never wonder which source you are on */
+.srcbar{display:none;align-items:center;gap:12px;flex-wrap:wrap;
+  background:#8a2c0d;color:#fff;border-radius:var(--r);padding:12px 16px;
+  margin-bottom:12px}
+.srcbar.show{display:flex}
+.srcbar b{font-size:16px;letter-spacing:.02em}
+.srcbar span{font-size:13px;opacity:.93}
+
+.idbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);padding:12px 16px}
+.mach{font-size:20px;font-weight:700;line-height:1.1}
+.mach small{display:block;font-size:11px;font-weight:500;color:var(--ink3);
+  letter-spacing:.09em;text-transform:uppercase;margin-bottom:3px}
+.grow{flex:1}
+.ctx{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;padding:10px 16px;
+  margin-top:12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);font-size:13px;color:var(--ink2)}
+.ctx b{color:var(--ink);font-weight:700}
+.ctx .clk{margin-left:auto;font-weight:700;color:var(--ink)}
+
+.hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px 20px;margin-top:12px}
+.cap-l{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink3)}
+.kg{font-size:clamp(44px,11vw,72px);font-weight:700;line-height:1;
+  letter-spacing:-.03em;margin:8px 0 0}
+.kg .u{font-size:.32em;font-weight:600;color:var(--ink3);margin-left:.14em}
+.sub{font-size:13px;color:var(--ink3);margin-top:7px}
+.badge{display:inline-flex;gap:6px;align-items:baseline;margin-left:10px;
+  padding:3px 9px;border:1px solid var(--line);border-radius:99px;font-size:12px;
+  font-weight:600;color:var(--ink2);text-transform:none;letter-spacing:0}
+
+.cnt{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px}
+.big{font-size:clamp(22px,5vw,30px);font-weight:700;line-height:1.1;
+  letter-spacing:-.02em;word-break:break-word}
+.note{font-size:12px;color:var(--ink3);margin-top:5px}
+.card.alarm .big{color:var(--bad)}
+
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink3);
+  margin:20px 0 9px}
+.grid3{display:grid;grid-template-columns:1fr;gap:10px}
+.row{display:flex;align-items:center;gap:9px;padding:6px 0;
+  border-bottom:1px solid #f0f2f4;font-size:13px}
+.row:last-child{border-bottom:0}
+.led{width:12px;height:12px;border-radius:50%;background:#dfe3e7;flex:none;
+  border:1px solid #ccd2d8}
+.led.on{background:var(--ok);border-color:var(--ok)}
+.led.cmd{background:var(--warn);border-color:var(--warn)}
+.nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 6px;
+  border-radius:4px;background:#eef0f2;color:var(--ink3)}
+.tag.sup{background:var(--badbg);color:var(--bad)}
+.tag.na{background:#eef0f2;color:var(--ink3)}
+
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:8px;padding:9px 14px;font:inherit;font-size:13px;font-weight:600;
+  cursor:pointer}
+.btn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.danger{background:#8a2c0d;color:#fff;border-color:#8a2c0d}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+input[type=number],input[type=password]{border:1px solid var(--line);
+  border-radius:8px;padding:9px 11px;font:inherit;font-size:14px;width:110px}
+
+.tl{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px;margin-top:10px;overflow-x:auto}
+.lane{display:flex;align-items:center;gap:8px;height:20px}
+.lane .lbl{width:150px;flex:none;font-size:11px;color:var(--ink2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane canvas{flex:1;height:14px;display:block}
+.tlfoot{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--ink3);
+  margin-top:8px;flex-wrap:wrap}
+.lost{color:var(--bad);font-weight:700}
+.ev{display:flex;gap:10px;font-size:12px;padding:3px 0;border-bottom:1px solid #f4f6f7}
+.ev .t{color:var(--ink3);min-width:74px}
+.ev b{min-width:62px}
+footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
+@media(min-width:860px){
+  .cnt{grid-template-columns:repeat(4,1fr)}
+  .grid3{grid-template-columns:repeat(3,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="srcbar" id="srcbar">
+    <b id="srcName">—</b>
+    <span id="srcMsg">Đầu vào không đến từ phần cứng. Output vật lý đang bị khoá.</span>
+    <div class="grow"></div>
+    <button class="btn" onclick="askMode('REAL_HW')">Về REAL_HW</button>
+  </div>
+
+  <div class="idbar">
+    <div class="mach"><small>SP01 · DEV</small><span id="mach">—</span></div>
+    <div class="grow"></div>
+    <button class="btn" onclick="location.href='/'">OP</button>
+  </div>
+
+  <div class="ctx">
+    <span>Runtime <b id="runtime">—</b></span>
+    <span>Cycle <b id="cycle">—</b></span>
+    <span>Bag <b id="bag">—</b></span>
+    <span>Authority <b id="auth">—</b></span>
+    <span class="clk" id="fw">FW —</span>
+  </div>
+
+  <div class="hero">
+    <div><span class="cap-l">Cân</span>
+      <span class="badge">Quality <b id="quality">—</b></span>
+      <span class="badge">fresh <b id="fresh">—</b></span>
+      <span class="badge">stable <b id="stable">—</b></span></div>
+    <div class="kg" id="kg">—<span class="u">kg</span></div>
+    <div class="sub" id="wsub">WeightSnapshot của tick hiện tại</div>
+  </div>
+
+  <div class="cnt">
+    <div class="card"><div class="cap-l">State</div><div class="big" id="state">—</div></div>
+    <div class="card" id="faultCard"><div class="cap-l">Fault</div><div class="big" id="fault">—</div></div>
+    <div class="card"><div class="cap-l">Position</div><div class="big" id="angle">—</div>
+      <div class="note" id="posnote">—</div></div>
+    <div class="card"><div class="cap-l">Core</div><div class="big" id="ready">—</div>
+      <div class="note">ready</div></div>
+  </div>
+
+  <h2>Nguồn đầu vào</h2>
+  <div class="card">
+    <div class="acts">
+      <button class="btn" id="mREAL_HW" onclick="askMode('REAL_HW')">REAL HW</button>
+      <button class="btn" id="mFULL_SW" onclick="askMode('FULL_SW')">FULL SW</button>
+      <button class="btn" id="mSIMU" onclick="askMode('SIMU')">SIMU</button>
+      <span class="grow"></span>
+      <button class="btn" id="simRun" onclick="toggleRun()">Chạy / dừng SIMU</button>
+    </div>
+    <div class="note" id="modeNote">Đổi nguồn cần PIN supervisor và chỉ được phép
+      khi controller ở WAIT_PERMISSIVE. FULL_SW và SIMU không bao giờ điều khiển
+      được output vật lý.</div>
+  </div>
+
+  <div class="card" id="injCard" style="margin-top:10px;display:none">
+    <div class="cap-l">Bơm tay (chỉ có tác dụng ở FULL_SW)</div>
+    <div id="injDi" style="margin-top:8px"></div>
+    <div class="acts">
+      <label>Cân <input type="number" id="injKg" step="0.1" value="0"></label>
+      <button class="btn" onclick="sendKg()">Đặt kg</button>
+      <label>Góc <input type="number" id="injDeg" step="1" value="0"></label>
+      <button class="btn" onclick="sendDeg()">Đặt độ</button>
+    </div>
+  </div>
+
+  <h2>Vào · lõi · ra</h2>
+  <div class="grid3">
+    <div class="card"><div class="cap-l">Inputs</div><div id="di"></div></div>
+    <div class="card"><div class="cap-l">Blocked by</div><div id="core"></div></div>
+    <div class="card"><div class="cap-l">Outputs</div><div id="do"></div>
+      <div class="note">D = FSM muốn · C = đã gửi tới adapter ·
+        Physical readback: N/A</div></div>
+  </div>
+
+  <h2>Timeline · đọc từ trace của firmware</h2>
+  <div class="tl" id="tl"></div>
+  <div class="tlfoot">
+    <span>Cửa sổ <b id="win">30</b> s</span>
+    <button class="btn" onclick="setWin(10)">10s</button>
+    <button class="btn" onclick="setWin(30)">30s</button>
+    <button class="btn" onclick="setWin(120)">120s</button>
+    <button class="btn" id="freezeBtn" onclick="toggleFreeze()">Đóng băng</button>
+    <span id="lost"></span>
+  </div>
+
+  <h2>Sự kiện</h2>
+  <div class="card" id="events"><div class="note">Chờ dữ liệu…</div></div>
+
+  <footer id="foot">SP01 DEV</footer>
+</div>
+
 <script>
-const D=['feeder_running','downstream_ready','machine_motor_running','initiative','fill_position','bag_present','position_index','position_mark'],O=['scanner.down','bag_detect_air','bag.push','dosing.valve_a','dosing.valve_b','dosing.valve_c','filling.motor','spout.aeration'],S=['WAIT_PERMISSIVE','WAIT_FILL_POSITION','BAG_ACQUIRE','BAG_VERIFY','TARE_READY','COARSE_FILL','FINE_FILL','CUTOFF','SETTLE','REJECT_WAIT','WAIT_DISCHARGE','PUSH','COMPLETE','FAULT'];let prev=null,events=[];const row=(n,v,c='')=>`<div class="row"><span>${n}</span><span class="lamp ${c}">${v}</span></div>`,lamps=(a,n)=>n.map((x,i)=>row(x,a[i]?'ON':'OFF',a[i]?'on':'')).join('');function add(t,v){events.unshift({t:new Date().toLocaleTimeString(),k:t,v});events=events.slice(0,80);timeline.innerHTML=events.map(e=>`<div class="ev"><span class="muted">${e.t}</span><b>${e.k}</b><span>${e.v}</span></div>`).join('')}function changes(s){if(!prev){add('BOOT VIEW',s.state);prev=s;return}if(s.state!==prev.state)add('STATE',prev.state+' → '+s.state);if(s.fault!==prev.fault)add('FAULT',prev.fault+' → '+s.fault);for(let i=0;i<8;i++){if(s.di_actual[i]!==prev.di_actual[i])add('DI'+(i+1),s.di_actual[i]?'ON':'OFF');if(s.commanded_do[i]!==prev.commanded_do[i])add('DO'+(i+1),s.commanded_do[i]?'ON':'OFF')}prev=s}async function poll(){try{const s=await(await fetch('/api/dev',{cache:'no-store'})).json();changes(s);conn.textContent='Trực tuyến · '+s.fw;conn.className='conn';state.textContent=s.state;mode.textContent=s.runtime_mode;cycle.textContent=s.cycle_id;bag.textContent=s.disposition;weight.textContent=s.weight.net_kg.toFixed(2)+' kg · '+s.weight.quality+(s.weight.fresh?' · FRESH':' · STALE');shadow.textContent=s.shadow_mode?'SHADOW · physical process DO suppressed':'';di.innerHTML=lamps(s.di_actual,D);core.innerHTML=row('ready',s.core.ready?'YES':'NO',s.core.ready?'on':'warn')+row('fault',s.fault,s.fault==='NONE'?'':'bad')+row('position',s.position.valid?s.position.angle_deg.toFixed(1)+'°':'INVALID',s.position.valid?'on':'warn')+row('blocked_by',s.core.blocks.length?s.core.blocks.map(x=>x.id).join(', '):'NONE',s.core.blocks.length?'warn':'on');let h='';for(let i=0;i<8;i++)h+=`<div class="row"><span>${O[i]}</span><span><span class="lamp ${s.desired_do[i]?'on':''}">DES ${s.desired_do[i]?'ON':'OFF'}</span> <span class="lamp ${s.commanded_do[i]?'on':''}">CMD ${s.commanded_do[i]?'ON':'OFF'}</span></span></div>`;do.innerHTML=h;flow.innerHTML=S.map(x=>`<span class="st ${x===s.state?'active':''}">${x}</span>`).join('');foot.textContent='SP01 DEV · '+s.fw}catch(e){conn.textContent='MẤT KẾT NỐI';conn.className='conn off'}setTimeout(poll,300)}poll()
-</script></body></html>
+const DI=['feeder_running','downstream_ready','machine_motor_running','initiative',
+          'fill_position','bag_present','position_index','position_mark'];
+const DO=['scanner.down','bag_detect_air','bag.push','dosing.valve_a',
+          'dosing.valve_b','dosing.valve_c','filling.motor','spout.aeration'];
+const PREVIEW = location.protocol === 'file:';
+
+let S=null, since=0, ev=[], lost=0, win=30, frozen=false, t0=0;
+
+/* ---------- trace ---------- */
+// Edges come from the firmware ring buffer. The old page diffed two polls 300 ms
+// apart, so a 500 ms push pulse was a coin flip and anything shorter vanished.
+async function pollTrace(){
+  if (PREVIEW) { demoTrace(); return; }
+  try{
+    const r = await fetch('/api/trace?since='+since, {cache:'no-store'});
+    const j = await r.json();
+    if (j.lost) lost += j.lost;
+    for (const e of j.events) ev.push(e);
+    since = j.last;
+    if (ev.length > 4000) ev = ev.slice(-4000);
+  }catch(e){}
+}
+
+function laneEdges(kind, ch){
+  return ev.filter(e => e.k===kind && e.c===ch);
+}
+
+function drawLanes(){
+  const host = document.getElementById('tl');
+  if (!ev.length){ host.innerHTML='<div class="note">Chưa có sự kiện</div>'; return; }
+  const now = ev[ev.length-1].t;
+  const span = win*1e6;
+  const from = frozen ? t0 : Math.max(0, now-span);
+  t0 = from;
+
+  const lanes = [];
+  DI.forEach((n,i)=>lanes.push(['DI', i, 'DI'+(i+1)+' '+n]));
+  DO.forEach((n,i)=>lanes.push(['DO', i, 'DO'+(i+1)+' '+n+' (D)']));
+  DO.forEach((n,i)=>lanes.push(['DOC', i, 'DO'+(i+1)+' (C)']));
+
+  if (host.childElementCount !== lanes.length){
+    host.innerHTML = lanes.map((l,i)=>
+      `<div class="lane"><div class="lbl">${l[2]}</div>`+
+      `<canvas id="cv${i}"></canvas></div>`).join('');
+  }
+  lanes.forEach((l,i)=>{
+    const cv = document.getElementById('cv'+i);
+    const w = cv.clientWidth||600, h = 14;
+    if (cv.width!==w){ cv.width=w; cv.height=h; }
+    const g = cv.getContext('2d');
+    g.clearRect(0,0,w,h);
+    g.fillStyle = '#f2f4f6'; g.fillRect(0,h/2-1,w,2);
+
+    const edges = laneEdges(l[0], l[1]).filter(e=>e.t>=from-span);
+    if (!edges.length) return;
+    const x = t => Math.max(0, Math.min(w, (t-from)/span*w));
+    // Reconstruct levels: a bar spans from a rising edge to the next falling one.
+    let level = edges[0].o===1 ? 1 : 0, prevT = from;
+    g.fillStyle = l[0]==='DOC' ? '#b26a00' : (l[0]==='DO' ? '#5c646c' : '#1c6b3c');
+    for (const e of edges){
+      if (level===1 && e.t>prevT){
+        const x1=x(prevT), x2=x(e.t);
+        g.fillRect(x1, 2, Math.max(2, x2-x1), h-4);  // floor width keeps
+      }                                              // short pulses visible
+      level = e.n===1?1:0; prevT = e.t;
+    }
+    if (level===1){
+      const x1=x(prevT), x2=x(now);
+      g.fillRect(x1, 2, Math.max(2, x2-x1), h-4);
+    }
+  });
+  document.getElementById('lost').innerHTML =
+    lost ? `<span class="lost">Mất ${lost} sự kiện — buffer đã tràn</span>` : '';
+}
+
+function drawEvents(){
+  const host = document.getElementById('events');
+  const recent = ev.slice(-40).reverse();
+  if (!recent.length) return;
+  host.innerHTML = recent.map(e=>{
+    const ms = (e.t/1000).toFixed(0);
+    let name = e.k, val = e.o+' → '+e.n;
+    if (e.k==='DI'){ name='DI'+(e.c+1); val = DI[e.c]+'  '+(e.n?'ON':'OFF'); }
+    if (e.k==='DO'){ name='DO'+(e.c+1); val = DO[e.c]+'  '+(e.n?'ON':'OFF'); }
+    if (e.k==='DOC'){ name='DO'+(e.c+1)+'C'; val = DO[e.c]+'  '+(e.n?'ON':'OFF'); }
+    return `<div class="ev"><span class="t">${ms} ms</span><b>${name}</b><span>${val}</span></div>`;
+  }).join('');
+}
+
+/* ---------- mode ---------- */
+async function askMode(m){
+  if (S && S.source===m) return;
+  const pin = prompt('PIN supervisor (6 số) để chuyển sang '+m);
+  if (!pin) return;
+  if (PREVIEW){ alert('preview: đổi sang '+m); return; }
+  const r = await fetch('/api/dev/mode',{method:'POST',
+    headers:{'Content-Type':'text/plain'}, body:'mode='+m+'&pin='+pin});
+  const t = await r.text();
+  if (!r.ok){
+    alert(t==='NOT_IDLE'
+      ? 'Không đổi được: controller phải ở WAIT_PERMISSIVE.'
+      : 'PIN không đúng.');
+  }
+  refresh();
+}
+async function inject(body){
+  if (PREVIEW) return;
+  await fetch('/api/dev/inject',{method:'POST',
+    headers:{'Content-Type':'text/plain'}, body});
+}
+function sendKg(){ inject('kg='+document.getElementById('injKg').value); }
+function sendDeg(){ inject('deg='+document.getElementById('injDeg').value); }
+function toggleRun(){ inject('run='+(S&&S.sim_running?'0':'1')); }
+function setWin(s){ win=s; document.getElementById('win').textContent=s; }
+function toggleFreeze(){
+  frozen=!frozen;
+  document.getElementById('freezeBtn').classList.toggle('on',frozen);
+}
+
+/* ---------- render ---------- */
+function rows(host, names, get){
+  document.getElementById(host).innerHTML = names.map((n,i)=>{
+    const r = get(i);
+    return `<div class="row"><div class="led ${r.cls}"></div>`+
+           `<div class="nm">${n}</div>${r.tag||''}</div>`;
+  }).join('');
+}
+
+function render(s){
+  S=s;
+  document.getElementById('mach').textContent = 'DEV';
+  document.getElementById('runtime').textContent = s.runtime_mode;
+  document.getElementById('cycle').textContent = s.cycle_id;
+  document.getElementById('bag').textContent = s.disposition;
+  document.getElementById('auth').textContent =
+    s.authority ? 'theo cấu hình' : 'KHOÁ SAFE';
+  document.getElementById('fw').textContent = 'FW '+s.fw;
+  document.getElementById('state').textContent = s.state;
+  document.getElementById('fault').textContent = s.fault;
+  document.getElementById('faultCard').classList.toggle('alarm', s.fault!=='NONE');
+  document.getElementById('angle').textContent =
+    s.position.valid ? s.position.angle_deg.toFixed(1)+'°' : '—';
+  document.getElementById('posnote').textContent =
+    s.position.valid ? 'valid' : 'decoder chưa đồng bộ';
+  document.getElementById('ready').textContent = s.core.ready ? 'READY' : 'BLOCKED';
+  document.getElementById('kg').innerHTML =
+    s.weight.net_kg.toFixed(3)+'<span class="u">kg</span>';
+  document.getElementById('quality').textContent = s.weight.quality;
+  document.getElementById('fresh').textContent = s.weight.fresh?'yes':'no';
+  document.getElementById('stable').textContent = s.weight.stable?'yes':'no';
+  document.getElementById('wsub').textContent = 'sequence '+s.weight.sequence;
+
+  // Source banner. Anything other than REAL_HW is abnormal and says so.
+  const bar = document.getElementById('srcbar');
+  bar.classList.toggle('show', s.source!=='REAL_HW');
+  document.getElementById('srcName').textContent = 'NGUỒN: '+s.source;
+  ['REAL_HW','FULL_SW','SIMU'].forEach(m=>
+    document.getElementById('m'+m).classList.toggle('on', s.source===m));
+  document.getElementById('injCard').style.display =
+    s.source==='FULL_SW' ? 'block' : 'none';
+  document.getElementById('simRun').disabled = s.source!=='SIMU';
+  document.getElementById('simRun').classList.toggle('on', s.source==='SIMU' && s.sim_running);
+
+  if (s.source==='FULL_SW' && !document.getElementById('injDi').childElementCount){
+    document.getElementById('injDi').innerHTML = DI.map((n,i)=>
+      `<button class="btn" style="margin:3px" id="ib${i}" onclick="tgl(${i})">`+
+      `DI${i+1} ${n}</button>`).join('');
+  }
+  DI.forEach((n,i)=>{
+    const b=document.getElementById('ib'+i);
+    if (b) b.classList.toggle('on', !!s.di_actual[i]);
+  });
+
+  rows('di', DI.map((n,i)=>'DI'+(i+1)+' '+n),
+       i=>({cls: s.di_actual[i]?'on':''}));
+  rows('do', DO.map((n,i)=>'DO'+(i+1)+' '+n), i=>({
+    cls: s.desired_do[i]?'on':'',
+    tag: `<span class="tag">D ${s.desired_do[i]?1:0}</span>`+
+         `<span class="tag ${s.authority?'':'sup'}">`+
+         `${s.authority?('C '+(s.commanded_do[i]?1:0)):'SUPPRESSED'}</span>`+
+         `<span class="tag na">P N/A</span>`
+  }));
+  document.getElementById('core').innerHTML = s.core.blocks.length
+    ? s.core.blocks.map(b=>`<div class="row"><div class="led cmd"></div>`+
+        `<div class="nm">${b.text||b.id}</div></div>`).join('')
+    : '<div class="note">Không có gì chặn</div>';
+}
+
+function tgl(i){
+  const on = S && S.di_actual[i];
+  inject('di='+i+'&v='+(on?0:1));
+}
+
+/* ---------- preview ---------- */
+let d={t:0};
+function demoTrace(){
+  d.t+=0.4;
+  const base=Math.round(d.t*1e6);
+  if (!ev.length){
+    for (let i=0;i<8;i++) ev.push({s:++since,t:0,k:'DI',c:i,o:-1,n:0});
+    for (let i=0;i<8;i++){ ev.push({s:++since,t:0,k:'DO',c:i,o:-1,n:0});
+                           ev.push({s:++since,t:0,k:'DOC',c:i,o:-1,n:0}); }
+  }
+  const ph=(d.t%14.4);
+  const set=(k,c,v)=>{
+    const last=[...ev].reverse().find(e=>e.k===k&&e.c===c);
+    if (last && last.n!==v) ev.push({s:++since,t:base,k,c,o:last.n,n:v});
+  };
+  set('DI',5, ph>1&&ph<12?1:0);
+  set('DO',6, ph>2&&ph<9?1:0);
+  set('DO',3, ph>2&&ph<7?1:0);
+  set('DO',2, ph>13.6?1:0);          // 0.5 s push pulse
+}
+function demoState(){
+  const ph=(d.t%14.4);
+  const di=[1,1,1,1,ph<1?1:0,ph>1&&ph<12?1:0,0,0];
+  const de=[0,0,ph>13.6?1:0,ph>2&&ph<7?1:0,0,0,ph>2&&ph<9?1:0,0];
+  return {fw:'preview',runtime_mode:'SHADOW',source:'SIMU',authority:false,
+    sim_running:true,manual_kg:0,manual_deg:0,
+    state:ph<1?'WAIT_FILL_POSITION':(ph<7?'COARSE_FILL':(ph<9?'FINE_FILL':'WAIT_DISCHARGE')),
+    fault:'NONE',cycle_id:7,disposition:'GOOD',di_actual:di,
+    core:{ready:true,blocks:[]},
+    weight:{net_kg:Math.min(50.2,ph*6),sequence:Math.round(d.t*10),
+            stable:false,fresh:true,quality:'GOOD'},
+    position:{valid:true,angle_deg:(ph/14.4)*360,revolution_us:14400000},
+    desired_do:de, commanded_do:[0,0,0,0,0,0,0,0]};
+}
+
+async function refresh(){
+  try{
+    const s = PREVIEW ? demoState()
+      : await (await fetch('/api/dev',{cache:'no-store'})).json();
+    render(s);
+  }catch(e){}
+}
+async function loop(){
+  await refresh();
+  await pollTrace();
+  drawLanes(); drawEvents();
+  setTimeout(loop, 300);
+}
+loop();
+</script>
+</body>
+</html>
