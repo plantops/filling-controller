@@ -119,7 +119,12 @@ struct ControllerConfig {
     std::uint64_t coarse_timeout_us{12000000};
     std::uint64_t fine_timeout_us{5000000};
     std::uint64_t settle_min_us{200000};
-    std::uint64_t reject_wait_timeout_us{0};
+    // Angle-based reject can wait most of a revolution, so this must exceed one
+    // turn with margin. Left at zero it was disabled entirely: a latched reject
+    // whose shaft stopped before 210 deg waited forever with no fault, while a
+    // healthy bag in WaitDischarge faulted after 20 s. The asymmetry was
+    // accidental.
+    std::uint64_t reject_wait_timeout_us{20000000};
     // With angle-based push the wait can approach a full revolution: a bag that
     // settles just after the discharge angle waits ~14.4 s at rated speed. The
     // timeout must therefore exceed one revolution with margin, or a healthy
