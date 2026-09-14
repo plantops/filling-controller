@@ -68,7 +68,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
-          command: "export PROJECT_VER=#${GITHUB_RUN_NUMBER}; idf.py build > idf_build.log 2>&1; rc=$?; tail -c 4000 idf_build.log; exit $rc"
+          command: "export PROJECT_VER=${GITHUB_RUN_NUMBER}; idf.py build > idf_build.log 2>&1; rc=$?; tail -c 4000 idf_build.log; exit $rc"
 
       - name: Publish build errors as a commit comment
         if: failure()
