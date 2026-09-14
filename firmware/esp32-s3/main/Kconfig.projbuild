@@ -81,21 +81,7 @@ config SP01_PUSH_DURATION_MS
     range 50 5000
     default 500
 
-config SP01_DISCHARGE_COUNTDOWN_COUNTS
-    int "Normalized post-ref-B discharge countdown"
-    range 1 10000
-    default 1000
-    help
-        A-to-B travel is normalized to 1000 counts. This value defines the
-        nominal post-B countdown before bag push.
 
-config SP01_DISCHARGE_LEAD_COUNTS
-    int "Discharge lead trim (normalized counts)"
-    range 0 9999
-    default 0
-    help
-        Subtracted from SP01_DISCHARGE_COUNTDOWN_COUNTS. Commission from
-        measured sensor geometry and actuator response; do not guess in field.
 
 config SP01_DI_INVERT_MASK
     hex "DI invert mask"
@@ -206,5 +192,20 @@ config SP01_SUPERVISOR_PIN
     default "111111"
     help
         Six digits. Same caveat as the operator PIN.
+
+config SP01_DISCHARGE_ANGLE_DEG
+    int "Normal discharge angle, degrees"
+    default 355
+    range 0 359
+
+config SP01_REJECT_ANGLE_DEG
+    int "Reject eject angle, degrees (S3)"
+    default 210
+    range 0 359
+
+config SP01_DISCHARGE_LEAD_DEG
+    int "Push lead, degrees advanced to compensate valve and mechanism delay"
+    default 0
+    range 0 60
 
 endmenu
