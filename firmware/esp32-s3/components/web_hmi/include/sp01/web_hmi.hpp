@@ -61,12 +61,13 @@ enum class HmiResult : std::uint8_t { Ok = 0, BadPin, Locked, Rejected };
 struct HmiCallbacks {
     HmiResult (*request_target)(float kg){nullptr};
     void (*set_time)(std::uint64_t unix_ms, std::int16_t tz_offset_min){nullptr};
+    // Reads recorded edges under the control-loop lock. Supplied by the
+    // application rather than called directly: web_hmi must not depend on main,
+    // which already depends on it.
+    std::size_t (*read_trace)(std::uint32_t since_seq, TraceEvent* out,
+                              std::size_t cap, std::uint32_t* lost,
+                              std::uint32_t* last_seq){nullptr};
 };
-
-// Implemented by the application: reads the trace under the control-loop lock.
-std::size_t hmi_read_trace(std::uint32_t since_seq, TraceEvent* out,
-                           std::size_t cap, std::uint32_t* lost,
-                           std::uint32_t* last_seq) noexcept;
 
 esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins,
                     const HmiCallbacks& callbacks);
