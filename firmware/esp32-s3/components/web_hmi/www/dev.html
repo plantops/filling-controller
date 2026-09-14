@@ -186,6 +186,16 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
       <label>Góc <input type="number" id="injDeg" step="1" value="0"></label>
       <button class="btn" onclick="sendDeg()">Đặt độ</button>
     </div>
+    <div class="cap-l" style="margin-top:14px">Đồng hồ controller</div>
+    <div class="note">Ở FULL_SW thời gian chỉ trôi khi bấm. Timeout giữ nguyên
+      giá trị thật, nên bấm đủ lâu vẫn thấy được fault đúng như trên máy.</div>
+    <div class="acts">
+      <button class="btn" onclick="step(10)">+10 ms</button>
+      <button class="btn" onclick="step(100)">+100 ms</button>
+      <button class="btn" onclick="step(500)">+0.5 s</button>
+      <button class="btn" onclick="step(1000)">+1 s</button>
+      <button class="btn" onclick="step(5000)">+5 s</button>
+    </div>
   </div>
 
   <h2>Vào · lõi · ra</h2>
@@ -376,6 +386,7 @@ async function inject(body){
 function sendKg(){ inject('kg='+document.getElementById('injKg').value); }
 function sendDeg(){ inject('deg='+document.getElementById('injDeg').value); }
 function toggleRun(){ inject('run='+(S&&S.sim_running?'0':'1')); }
+function step(ms){ inject('step='+ms); }
 function setWin(s){ win=s; document.getElementById('win').textContent=s; }
 function toggleFreeze(){
   frozen=!frozen;
