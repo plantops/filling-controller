@@ -4,9 +4,12 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -34,6 +37,24 @@ HmiPublish g_state{};
 
 int g_pin_failures = 0;
 std::uint64_t g_locked_until_us = 0;
+
+esp_err_t init_network_stack() noexcept {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        err = nvs_flash_erase();
+        if (err == ESP_OK) err = nvs_flash_init();
+    }
+    if (err != ESP_OK) return err;
+
+    err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
+
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
+
+    ESP_LOGI(kTag, "network stack ready (fw290 bootstrap)");
+    return ESP_OK;
+}
 
 HmiPublish snapshot_copy() {
     portENTER_CRITICAL(&g_mux);
@@ -116,8 +137,6 @@ esp_err_t state_handler(httpd_req_t* req) {
                       (start + kShiftHours) % 24);
     }
 
-    // Build the optional fragments first: a static buffer inside the format
-    // call would be shared between concurrent requests.
     char pending[40] = "";
     if (s.target_pending_kg > 0.0F) {
         std::snprintf(pending, sizeof(pending), "\"target_pending_kg\":%.1f,",
@@ -251,13 +270,19 @@ esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins,
     g_pins = pins;
     g_cb = callbacks;
 
+    esp_err_t err = init_network_stack();
+    if (err != ESP_OK) {
+        ESP_LOGE(kTag, "network stack init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = 80;
     cfg.max_uri_handlers = 8;
     cfg.lru_purge_enable = true;
     cfg.stack_size = 8192;
 
-    esp_err_t err = httpd_start(&g_server, &cfg);
+    err = httpd_start(&g_server, &cfg);
     if (err != ESP_OK) return err;
 
     const httpd_uri_t routes[] = {
