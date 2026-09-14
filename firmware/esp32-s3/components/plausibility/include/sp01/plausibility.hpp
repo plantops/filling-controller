@@ -39,6 +39,12 @@ enum class Implausible : std::uint8_t {
     // The machine is turning but a position input has produced no edge at all
     // over several revolutions.
     PositionInputDead,
+    // DI5 is a pulse at the fill position, not a level.
+    FillPositionStuckHigh,
+    // Confirmed by the plant owner: cement must not enter the bag while the
+    // hopper feeder is stopped. Weight rising then means the feeder signal is
+    // wrong, or material is passing a closed gate.
+    WeightRisingWithFeederOff,
     Count,
 };
 
@@ -51,6 +57,12 @@ struct PlausibilityConfig {
     std::uint32_t dead_input_revolutions{3};
     // An edge shorter than this is contact bounce, not a real transition.
     std::uint64_t debounce_us{5000};
+
+    // Weight must climb by at least this much, for at least this long, with the
+    // feeder off, before it counts. Generous on purpose: a rule that trips on
+    // scale noise teaches people to ignore alarms.
+    float feeder_off_rise_kg{0.5F};
+    std::uint64_t feeder_off_window_us{1000000};
 };
 
 struct PlausibilityStatus {
@@ -73,7 +85,8 @@ class PlausibilityMonitor {
 
     // Latches violations. Operation stays blocked until clear() is called, so a
     // fault that appears for one tick cannot be missed.
-    void update(std::uint64_t now_us, const InputImage& inputs) noexcept;
+    void update(std::uint64_t now_us, const InputImage& inputs,
+                const WeightSnapshot& weight) noexcept;
 
     // Called when the operator has investigated. Anything still wrong latches
     // again on the next tick, so clearing does not hide a live fault.
@@ -100,6 +113,11 @@ class PlausibilityMonitor {
     std::uint64_t last_index_edge_us_{0};
     std::uint64_t last_mark_edge_us_{0};
     std::uint64_t motor_started_us_{0};
+    std::uint64_t fill_pos_high_since_us_{0};
+    bool prev_fill_pos_{false};
+    bool prev_feeder_{false};
+    float feeder_off_ref_kg_{0.0F};
+    std::uint64_t feeder_off_since_us_{0};
 };
 
 }  // namespace sp01
