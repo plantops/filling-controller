@@ -136,13 +136,14 @@ void log_build_and_config_identity() noexcept {
     }
     ESP_LOGI(kTag,
              "config control_ms=%d target_g=%d coarse_to_fine_g=%d cutoff_margin_g=%d weight_stale_ms=%d "
-             "broken_loss_g=%d broken_persist_ms=%d reject_timeout_ms=%d discharge_counts=%d discharge_lead=%d "
+             "broken_loss_g=%d broken_persist_ms=%d reject_timeout_ms=%d discharge_deg=%d reject_deg=%d lead_deg=%d "
              "di_invert=0x%02x do_invert=0x%02x tlb_enable=%d dummy_weight=%d tlb_baud=%d tlb_slave=%d tlb_poll_ms=%d",
              CONFIG_SP01_CONTROL_PERIOD_MS, CONFIG_SP01_TARGET_G, CONFIG_SP01_COARSE_TO_FINE_G,
              CONFIG_SP01_CUTOFF_MARGIN_G, CONFIG_SP01_WEIGHT_STALE_MS,
              CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G, CONFIG_SP01_BROKEN_BAG_PERSIST_MS,
-             CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS, CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS,
-             CONFIG_SP01_DISCHARGE_LEAD_COUNTS, CONFIG_SP01_DI_INVERT_MASK, CONFIG_SP01_DO_INVERT_MASK,
+             CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS, CONFIG_SP01_DISCHARGE_ANGLE_DEG,
+             CONFIG_SP01_REJECT_ANGLE_DEG, CONFIG_SP01_DISCHARGE_LEAD_DEG,
+             CONFIG_SP01_DI_INVERT_MASK, CONFIG_SP01_DO_INVERT_MASK,
 #if CONFIG_SP01_TLB_ENABLE
              1,
 #else
