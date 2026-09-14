@@ -1,12 +1,9 @@
 #pragma once
 
-// SP01 operator HMI server.
+// SP01 operator + commissioning HMI server.
 //
-// This component renders and serves. It computes nothing: every derived value
-// arrives from the application in HmiPublish, produced next to the controller by
-// explain_controller(). The previous HMI kept a second copy of the permissive
-// rule, the output map and the transition table in JavaScript, and it drifted
-// out of agreement with the firmware without anyone noticing.
+// The HMI renders only values computed by the application/controller. It does
+// not duplicate permissive, output-map or transition logic in JavaScript.
 
 #include <cstdint>
 
@@ -19,17 +16,14 @@
 namespace sp01 {
 
 struct HmiIdentity {
-    char machine[24]{"—"};   // shown as-is, e.g. "MAY 3"
-    char spout[24]{"—"};     // e.g. "VOI 7"
-    char firmware[40]{""};   // esp_app_desc_t::version is char[32]
+    char machine[24]{"—"};
+    char spout[24]{"—"};
+    char firmware[40]{""};
 };
 
-// PINs confirm an intent; they are not access control. Over plain HTTP on a
-// commissioning access point, anyone on the network who knows the PIN can use
-// it. The value is preventing a mis-tap from changing a running target.
 struct HmiPins {
-    char operator_pin[8]{"1111"};    // 4 digits, changes target
-    char supervisor_pin[12]{"111111"};  // 6 digits, edits recipes
+    char operator_pin[8]{"1111"};
+    char supervisor_pin[12]{"111111"};
 };
 
 // One coherent picture of the machine, published by the application each tick.
@@ -37,13 +31,21 @@ struct HmiPublish {
     ControllerSnapshot snapshot{};
     Explain explain{};
 
-    float weight_kg{0.0F};        // live net
-    float target_kg{0.0F};        // in force now
-    float target_pending_kg{0.0F};  // accepted, waiting for the spout to clear
+    // DEV HMI raw/live view. These are copied from the same control-loop tick
+    // that produced snapshot/explain, so DI -> core -> DO cannot drift.
+    InputImage inputs{};
+    WeightSnapshot weight{};
+    OutputImage commanded_outputs{};
+    PositionSnapshot position{};
+    bool shadow_mode{false};
+
+    float weight_kg{0.0F};
+    float target_kg{0.0F};
+    float target_pending_kg{0.0F};
 
     bool has_last_bag{false};
     float last_bag_kg{0.0F};
-    char last_bag_time[12]{""};   // HH:MM:SS local
+    char last_bag_time[12]{""};
 
     bool time_synced{false};
     CivilTime civil{};
@@ -53,14 +55,10 @@ struct HmiPublish {
     ShiftCounters unattributed{};
 };
 
-// Results the application returns when the HMI asks for a change.
 enum class HmiResult : std::uint8_t { Ok = 0, BadPin, Locked, Rejected };
 
 struct HmiCallbacks {
-    // Stage a target change. The application applies it only once the current
-    // bag has left the spout; it must not alter a bag mid-fill.
     HmiResult (*request_target)(float kg){nullptr};
-    // Browser clock. tz_offset_min is minutes to add to UTC.
     void (*set_time)(std::uint64_t unix_ms, std::int16_t tz_offset_min){nullptr};
 };
 
