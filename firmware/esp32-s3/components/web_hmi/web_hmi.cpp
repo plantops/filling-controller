@@ -244,6 +244,47 @@ esp_err_t target_handler(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "ok");
 }
 
+esp_err_t trace_handler(httpd_req_t* req) {
+    std::uint32_t since = 0;
+    char query[48];
+    char val[16];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "since", val, sizeof(val)) == ESP_OK) {
+        since = static_cast<std::uint32_t>(std::strtoul(val, nullptr, 10));
+    }
+
+    static TraceEvent events[96];
+    std::uint32_t lost = 0;
+    std::uint32_t last = 0;
+    const std::size_t n = hmi_read_trace(since, events, 96, &lost, &last);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    char head[96];
+    std::snprintf(head, sizeof(head),
+                  "{\"last\":%lu,\"lost\":%lu,\"events\":[",
+                  static_cast<unsigned long>(last),
+                  static_cast<unsigned long>(lost));
+    httpd_resp_sendstr_chunk(req, head);
+
+    char item[128];
+    for (std::size_t i = 0; i < n; ++i) {
+        const TraceEvent& e = events[i];
+        std::snprintf(item, sizeof(item),
+                      "%s{\"s\":%lu,\"t\":%llu,\"k\":\"%s\",\"c\":%u,"
+                      "\"o\":%ld,\"n\":%ld}",
+                      i == 0 ? "" : ",", static_cast<unsigned long>(e.seq),
+                      static_cast<unsigned long long>(e.t_us),
+                      trace_kind_name(e.kind), e.channel,
+                      static_cast<long>(e.old_value),
+                      static_cast<long>(e.new_value));
+        httpd_resp_sendstr_chunk(req, item);
+    }
+    httpd_resp_sendstr_chunk(req, "]}");
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
 esp_err_t time_handler(httpd_req_t* req) {
     char body[96];
     if (!read_body(req, body, sizeof(body))) {
@@ -281,7 +322,7 @@ esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins, const HmiC
     }
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = 80;
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 12;
     cfg.lru_purge_enable = true;
     cfg.stack_size = 8192;
     err = httpd_start(&g_server, &cfg);
@@ -293,6 +334,7 @@ esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins, const HmiC
         {"/api/dev", HTTP_GET, dev_state_handler, nullptr},
         {"/api/op/target", HTTP_POST, target_handler, nullptr},
         {"/api/time", HTTP_POST, time_handler, nullptr},
+        {"/api/trace", HTTP_GET, trace_handler, nullptr},
     };
     for (const auto& r : routes) {
         err = httpd_register_uri_handler(g_server, &r);
