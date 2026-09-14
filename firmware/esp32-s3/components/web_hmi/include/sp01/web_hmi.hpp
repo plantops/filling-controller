@@ -21,7 +21,7 @@ namespace sp01 {
 struct HmiIdentity {
     char machine[24]{"—"};   // shown as-is, e.g. "MAY 3"
     char spout[24]{"—"};     // e.g. "VOI 7"
-    char firmware[24]{""};   // short git sha
+    char firmware[40]{""};   // esp_app_desc_t::version is char[32]
 };
 
 // PINs confirm an intent; they are not access control. Over plain HTTP on a
