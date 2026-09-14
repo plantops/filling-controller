@@ -1,5 +1,9 @@
 # SP01 — bản mô tả con robot
 
+Trong tài liệu này, **bộ não** là thứ đọc giác quan và ra lệnh cho cơ bắp. Không
+gọi tên con chip hay tên board ở bất cứ đâu ngoài phần 11. Đổi phần cứng thì chỉ
+phần 11 phải sửa, chín phần còn lại vẫn đúng.
+
 Điền xong bản này thì phần mềm chỉ còn là phiên dịch. Chưa điền xong thì không viết
 code, vì mọi chỗ trống sẽ được lấp bằng suy đoán, và suy đoán sai không tự lộ ra.
 
@@ -37,8 +41,7 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 
 | Ô | Nghĩa | Ví dụ |
 |---|---|---|
-| Chân | terminal vật lý | DI5 |
-| Tên | tên ngữ nghĩa, không phải số chân | cycle.fill_position |
+| Tên | tên ngữ nghĩa của giác quan | cycle.fill_position |
 | Thiết bị | cái gì tạo ra tín hiệu | cảm biến tiệm cận NPN |
 | Kiểu | **xung** hay **mức** | xung |
 | Nếu xung | rộng bao nhiêu ms, bao lâu lặp lại | ~80 ms, mỗi vòng 1 lần |
@@ -50,21 +53,22 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 
 ### Bảng điền
 
-| Chân | Tên | Thiết bị | Kiểu | Xung: rộng/chu kỳ | Mức: từ→đến | Tích cực | ON nghĩa là | OFF nghĩa là | Mất tín hiệu |
-|---|---|---|---|---|---|---|---|---|---|
-| DI1 | | | | | | | | | |
-| DI2 | | | | | | | | | |
-| DI3 | | | | | | | | | |
-| DI4 | | | | | | | | | |
-| DI5 | | | | | | | | | |
-| DI6 | | | | | | | | | |
-| DI7 | | | | | | | | | |
-| DI8 | | | | | | | | | |
-| ? | nút ON/OFF trên vòi | | | | | | | | |
+Liệt kê **mọi** giác quan mà máy có, kể cả cái bộ não hiện chưa đọc được. Số lượng
+không bị giới hạn bởi số chân của board — chuyện đủ chân hay không là việc của
+phần 11.
 
-**Tín hiệu nào chưa có chân?** Liệt kê hết, kể cả cái đang nằm trong mạch máy:
-
-> 
+| Tên | Thiết bị | Kiểu | Xung: rộng/chu kỳ | Mức: từ→đến | Tích cực | ON nghĩa là | OFF nghĩa là | Mất tín hiệu |
+|---|---|---|---|---|---|---|---|---|
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
+| | | | | | | | | |
 
 ---
 
@@ -89,8 +93,7 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 
 | Ô | Nghĩa |
 |---|---|
-| Chân | terminal |
-| Tên | tên ngữ nghĩa |
+| Tên | tên ngữ nghĩa của cơ bắp |
 | Nó điều khiển vật gì | van, contactor, xi lanh… |
 | Kiểu | **xung** hay **giữ** |
 | Nếu xung | dài bao nhiêu ms |
@@ -99,17 +102,17 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 | Bật nhầm thì hậu quả gì | |
 | Có phản hồi về không | nếu không, ghi rõ "không có" |
 
-| Chân | Tên | Điều khiển vật gì | Kiểu | Xung dài | Tích cực | Mất điện thì ở đâu | Bật nhầm thì sao | Phản hồi |
-|---|---|---|---|---|---|---|---|---|
-| DO1 | | | | | | | | |
-| DO2 | | | | | | | | |
-| DO3 | | | | | | | | |
-| DO4 | | | | | | | | |
-| DO5 | | | | | | | | |
-| DO6 | | | | | | | | |
-| DO7 | | | | | | | | |
-| DO8 | | | | | | | | |
-| ? | van kẹp bao | | | | | | | |
+| Tên | Điều khiển vật gì | Kiểu | Xung dài | Tích cực | Mất điện thì ở đâu | Bật nhầm thì sao | Phản hồi |
+|---|---|---|---|---|---|---|---|
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
+| | | | | | | | |
 
 **Cơ cấu nào robot KHÔNG điều khiển nhưng có ảnh hưởng tới nó?**
 
@@ -128,7 +131,7 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 
 ### Các mốc góc
 
-| Góc | Sự kiện | Cảm biến | Vào chân nào |
+| Góc | Sự kiện | Cảm biến | Tên giác quan tương ứng |
 |---|---|---|---|
 | | | | |
 | | | | |
@@ -211,9 +214,14 @@ Và:
 | Câu hỏi | Trả lời |
 |---|---|
 | Nút dừng khẩn nằm ở đâu, cắt cái gì | |
-| Nó có đi qua ESP32 không | |
-| Nếu ESP32 treo, máy dừng bằng cách nào | |
+| Nó có đi qua bộ não không, hay cắt cứng | |
+| Nếu bộ não treo hẳn, máy dừng bằng cách nào | |
+| Nếu bộ não mất điện, máy dừng bằng cách nào | |
 | Ai được phép trao quyền điều khiển thật cho robot | |
+
+Một chức năng an toàn đi qua phần mềm thì phụ thuộc phần mềm. Nếu câu trả lời cho
+hai dòng giữa là "không có gì khác", hãy ghi đúng như vậy — đó là một phát hiện,
+không phải một ô trống.
 
 ---
 
@@ -259,6 +267,46 @@ Mọi ô `?` ở trên chép xuống đây, kèm cách tìm ra câu trả lời 
 
 ---
 
+## 11. Đấu nối trên phần cứng hiện tại
+
+Đây là phần **duy nhất** nhắc tới board, chip, số chân. Đổi phần cứng thì chỉ sửa ở
+đây.
+
+| Phần cứng đang dùng | |
+|---|---|
+| Board | |
+| Số đầu vào có sẵn | |
+| Số đầu ra có sẵn | |
+| Đường nối tới cân | |
+
+### Giác quan → chân
+
+| Tên giác quan (phần 1) | Chân | Ghi chú đấu nối |
+|---|---|---|
+| | | |
+| | | |
+
+### Cơ bắp → chân
+
+| Tên cơ bắp (phần 3) | Chân | Ghi chú đấu nối |
+|---|---|---|
+| | | |
+| | | |
+
+### Chưa đủ chân
+
+Giác quan hoặc cơ bắp nào ở phần 1 và 3 **chưa có chân**, và dự định giải quyết ra
+sao:
+
+| Tên | Vì sao chưa có chân | Hướng xử lý |
+|---|---|---|
+| | | |
+
+Gộp nhiều cảm biến vào một chân là một hướng, nhưng phải ghi rõ ở đây cách phân
+biệt chúng, vì đó là logic sẽ phải viết trong phần mềm.
+
+---
+
 ## Cách dùng bản này
 
 1. Điền phần 1, 2, 3 trước — giác quan và cơ bắp. Đây là sự thật vật lý, đo được,
@@ -266,7 +314,9 @@ Mọi ô `?` ở trên chép xuống đây, kèm cách tìm ra câu trả lời 
 2. Phần 4 đo bằng cách quay tay và ghi lại.
 3. Phần 5, 6 viết bằng lời, không dùng thuật ngữ phần mềm.
 4. Phần 7, 8 hỏi người vận hành lâu năm — họ biết máy hỏng kiểu gì.
-5. Phần 10 là danh sách việc phải làm.
+5. Phần 11 điền sau cùng. Nếu điền trước, số chân sẵn có sẽ âm thầm giới hạn những
+   gì anh nghĩ là máy có.
+6. Phần 10 là danh sách việc phải làm.
 
 Khi phần 1–8 không còn ô `?` nào chặn đường, lúc đó mới viết code. Mỗi dòng trong
 phần 6 và 7 sẽ thành một test chạy được, và test đó kiểm tra đúng điều anh viết ra
