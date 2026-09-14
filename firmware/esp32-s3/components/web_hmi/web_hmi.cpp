@@ -180,13 +180,18 @@ esp_err_t dev_state_handler(httpd_req_t* req) {
     bool_array_json(s.commanded_outputs.channels.data(), s.commanded_outputs.channels.size(), commanded, sizeof(commanded));
     char body[2800];
     const int n = std::snprintf(body, sizeof(body),
-        "{\"fw\":\"%s\",\"runtime_mode\":\"%s\",\"state\":\"%s\",\"fault\":\"%s\","
+        "{\"fw\":\"%s\",\"runtime_mode\":\"%s\",\"source\":\"%s\","
+        "\"authority\":%s,\"sim_running\":%s,\"manual_kg\":%.2f,\"manual_deg\":%.1f,\"state\":\"%s\",\"fault\":\"%s\","
         "\"cycle_id\":%lu,\"disposition\":\"%s\",\"di_actual\":%s,"
         "\"core\":{\"ready\":%s,\"blocks\":%s},"
         "\"weight\":{\"net_kg\":%.3f,\"sequence\":%lu,\"stable\":%s,\"fresh\":%s,\"quality\":\"%s\"},"
         "\"position\":{\"valid\":%s,\"angle_deg\":%.2f,\"revolution_us\":%llu},"
         "\"desired_do\":%s,\"commanded_do\":%s}",
         g_identity.firmware, s.shadow_mode ? "SHADOW" : mode_name(s.snapshot.mode),
+        run_mode_name(s.source_mode), s.output_authority ? "true" : "false",
+        s.sim_running ? "true" : "false",
+        static_cast<double>(s.manual_weight_kg),
+        static_cast<double>(s.manual_angle_deg),
         state_name(s.snapshot.state), fault_name(s.snapshot.fault), static_cast<unsigned long>(s.snapshot.cycle_id),
         disposition_name(s.snapshot.disposition), di, s.explain.ready ? "true" : "false", blocks,
         static_cast<double>(s.weight.net_kg), static_cast<unsigned long>(s.weight.sequence),
