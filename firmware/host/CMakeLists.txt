@@ -33,6 +33,14 @@ target_include_directories(sp01_trace PUBLIC
     ${SP01_COMPONENTS}/controller/include
 )
 
+add_library(sp01_testsource STATIC
+    ${SP01_COMPONENTS}/testsource/test_source.cpp
+)
+target_include_directories(sp01_testsource PUBLIC
+    ${SP01_COMPONENTS}/testsource/include
+    ${SP01_COMPONENTS}/controller/include
+)
+
 add_library(sp01_timekeep STATIC
     ${SP01_COMPONENTS}/timekeep/time_shift.cpp
 )
@@ -47,7 +55,7 @@ target_include_directories(sp01_host_support INTERFACE
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    foreach(lib sp01_controller sp01_position sp01_timekeep sp01_trace)
+    foreach(lib sp01_controller sp01_position sp01_timekeep sp01_trace sp01_testsource)
         target_compile_options(${lib} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endforeach()
     target_compile_options(sp01_host_support INTERFACE -Wall -Wextra -Wpedantic -Werror)
@@ -61,7 +69,7 @@ enable_testing()
 function(sp01_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE sp01_controller sp01_host_support
-                          sp01_position sp01_timekeep sp01_trace)
+                          sp01_position sp01_timekeep sp01_trace sp01_testsource)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -72,3 +80,4 @@ sp01_test(sp01_explain_tests     tests/explain_test.cpp)
 sp01_test(sp01_position_tests    tests/position_decoder_test.cpp)
 sp01_test(sp01_time_shift_tests  tests/time_shift_test.cpp)
 sp01_test(sp01_trace_tests       tests/trace_test.cpp)
+sp01_test(sp01_test_source_tests tests/test_source_test.cpp)
