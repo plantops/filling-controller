@@ -1,3 +1,4 @@
+# Keep fw290 network stack dependencies explicit: HTTP must not start before lwIP/netif/event loop.
 idf_component_register(
     SRCS "web_hmi.cpp"
     INCLUDE_DIRS "include"
