@@ -16,6 +16,11 @@ bool zeroing_state(State s) noexcept {
            s == State::BagAcquire || s == State::TareReady;
 }
 
+bool mode_change_allowed(State s) noexcept {
+    return s == State::WaitPermissive || s == State::Fault ||
+           s == State::Complete;
+}
+
 }  // namespace
 
 const char* run_mode_name(RunMode mode) noexcept {
@@ -42,8 +47,10 @@ ModeChange TestSource::request_mode(RunMode next, State controller_state,
     if (next == mode_) return ModeChange::Unchanged;
     if (!pin_ok) return ModeChange::BadPin;
     // Changing the source of truth mid-cycle would leave a bag started from one
-    // source and finished from another.
-    if (controller_state != State::WaitPermissive) return ModeChange::NotIdle;
+    // source and finished from another. A faulted or completed controller is not
+    // mid-cycle, and refusing there only traps the operator: a fault raised in
+    // FULL_SW could not be escaped, because leaving FULL_SW was itself blocked.
+    if (!mode_change_allowed(controller_state)) return ModeChange::NotIdle;
 
     mode_ = next;
     if (next == RunMode::Simu) reset_sim();
