@@ -476,6 +476,24 @@ void on_set_manual_weight(float kg) { g_source.set_weight_kg(kg); }
 void on_set_manual_angle(float deg) { g_source.set_angle_deg(deg); }
 void on_set_sim_running(bool running) { g_source.set_running(running); }
 
+// Reset is the escape hatch. It has no preconditions on purpose: every guard
+// added so far has, at least once, trapped the operator in a state they could
+// not leave. Outputs go safe as part of the reset, and the loss is logged and
+// traced so nobody later wonders where a cycle went.
+void on_reset() {
+    const std::uint64_t now = static_cast<std::uint64_t>(esp_timer_get_time());
+    const sp01::ControllerSnapshot before = g_controller->snapshot();
+    ESP_LOGW(kTag,
+             "RESET requested in %s: cycle %lu abandoned, disposition %s, "
+             "outputs forced safe",
+             sp01::state_name(before.state),
+             static_cast<unsigned long>(before.cycle_id),
+             sp01::disposition_name(before.disposition));
+    g_controller->reset(g_source.mode() == sp01::RunMode::FullSw ? g_sw_clock_us
+                                                                 : now);
+    (void)g_io->force_safe();
+}
+
 bool on_clear_fault() {
     const std::uint64_t now = static_cast<std::uint64_t>(esp_timer_get_time());
     sp01::InputImage inputs{};
@@ -581,6 +599,7 @@ extern "C" void app_main(void) {
     callbacks.set_sim_running = &on_set_sim_running;
     callbacks.step_ms = &on_step_ms;
     callbacks.clear_fault = &on_clear_fault;
+    callbacks.reset_controller = &on_reset;
 
     const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
