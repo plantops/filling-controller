@@ -296,6 +296,11 @@ esp_err_t trace_handler(httpd_req_t* req) {
 
 // POST /api/dev/mode   mode=REAL_HW|FULL_SW|SIMU & pin=<supervisor 6 digits>
 esp_err_t mode_handler(httpd_req_t* req) {
+    const std::uint64_t now = static_cast<std::uint64_t>(esp_timer_get_time());
+    if (locked_out(now)) {
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        return httpd_resp_sendstr(req, "LOCKED");
+    }
     char body[96];
     if (!read_body(req, body, sizeof(body))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "mode and pin required");
@@ -317,7 +322,20 @@ esp_err_t mode_handler(httpd_req_t* req) {
         return ESP_FAIL;
     }
 
+    // Six digits is a million combinations, but a script still walks it. The
+    // lockout is what makes the PIN mean anything.
     const bool pin_ok = std::strcmp(pin, g_pins.supervisor_pin) == 0;
+    if (!pin_ok) {
+        ++g_pin_failures;
+        if (g_pin_failures >= kMaxPinAttempts) {
+            g_locked_until_us = now + kLockoutUs;
+            g_pin_failures = 0;
+            ESP_LOGW(kTag, "PIN entry locked for 30 s after %d failures",
+                     kMaxPinAttempts);
+        }
+    } else {
+        g_pin_failures = 0;
+    }
     if (g_cb.request_mode == nullptr) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no handler");
         return ESP_FAIL;
