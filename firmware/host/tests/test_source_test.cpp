@@ -13,6 +13,16 @@ int main(){
   // Gating.
   check(ts.request_mode(RunMode::FullSw, State::CoarseFill, true)==ModeChange::NotIdle,
         "mode change refused mid-cycle");
+  // A faulted controller is not mid-cycle. Refusing here trapped the operator:
+  // a fault raised inside FULL_SW made leaving FULL_SW impossible.
+  check(ts.request_mode(RunMode::FullSw, State::Fault, true)==ModeChange::Ok,
+        "mode change allowed from FAULT");
+  ts.request_mode(RunMode::RealHw, State::Fault, true);
+  check(ts.request_mode(RunMode::Simu, State::Complete, true)==ModeChange::Ok,
+        "mode change allowed from COMPLETE");
+  ts.request_mode(RunMode::RealHw, State::WaitPermissive, true);
+  check(ts.request_mode(RunMode::FullSw, State::FineFill, true)==ModeChange::NotIdle,
+        "mode change still refused mid-fill");
   check(ts.request_mode(RunMode::FullSw, State::WaitPermissive, false)==ModeChange::BadPin,
         "mode change refused with a wrong PIN");
   check(ts.request_mode(RunMode::FullSw, State::WaitPermissive, true)==ModeChange::Ok,
