@@ -85,6 +85,7 @@ struct HmiCallbacks {
     void (*set_sim_running)(bool running){nullptr};
     // FULL_SW only: advance the controller clock by this many milliseconds.
     void (*step_ms)(std::uint32_t ms){nullptr};
+    bool (*clear_fault)(){nullptr};
 };
 
 esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins,
