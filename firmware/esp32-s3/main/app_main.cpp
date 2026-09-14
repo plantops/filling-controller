@@ -36,8 +36,8 @@ sp01::WeightSnapshot g_weight_snapshot{};
 sp01::ControllerSnapshot g_controller_snapshot{};
 sp01::OutputImage g_commanded_outputs{};
 
-// Position, clock and shift accounting live beside the controller so every
-// derived value the HMI shows is computed in firmware, never in the browser.
+// Position, clock and shift accounting sit beside the controller so every value
+// the HMI shows is computed in firmware, never re-derived in the browser.
 sp01::PositionDecoder g_position{};
 sp01::PositionSnapshot g_last_position{};
 sp01::TimeKeeper g_clock{};
@@ -102,8 +102,10 @@ sp01::ControllerConfig make_controller_config() noexcept {
     c.settle_min_us = static_cast<std::uint64_t>(CONFIG_SP01_SETTLE_MIN_MS) * 1000ULL;
     c.wait_discharge_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_WAIT_DISCHARGE_TIMEOUT_MS) * 1000ULL;
     c.push_duration_us = static_cast<std::uint64_t>(CONFIG_SP01_PUSH_DURATION_MS) * 1000ULL;
-    c.discharge_countdown_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS);
-    c.discharge_lead_counts = static_cast<std::uint32_t>(CONFIG_SP01_DISCHARGE_LEAD_COUNTS);
+    // Push points are angles now; the plant is discussed in degrees.
+    c.discharge_angle_deg = static_cast<float>(CONFIG_SP01_DISCHARGE_ANGLE_DEG);
+    c.reject_angle_deg = static_cast<float>(CONFIG_SP01_REJECT_ANGLE_DEG);
+    c.discharge_lead_deg = static_cast<float>(CONFIG_SP01_DISCHARGE_LEAD_DEG);
     return c;
 }
 
@@ -228,8 +230,159 @@ bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
     return weight.sample_time_us <= now && now - weight.sample_time_us <= g_controller_config.weight_stale_us;
 }
 
-// The HMI no longer pulls a snapshot: the control loop pushes one coherent
-// picture each tick via hmi_publish(), produced next to the controller.
+// The HMI is no longer polled: the control loop pushes one coherent picture
+// each tick via hmi_publish(), produced beside the controller.
+
+#if CONFIG_SP01_TLB_ENABLE
+void weighing_task(void*) {
+    TickType_t last = xTaskGetTickCount();
+    for (;;) {
+        const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
+        const esp_err_t err = g_tlb->poll_once(now);
+        if (err != ESP_OK) ESP_LOGD(kTag, "TLB poll: %s", esp_err_to_name(err));
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_TLB_POLL_MS));
+    }
+}
+#endif
+
+void control_task(void*) {
+    (void)esp_task_wdt_add(nullptr);
+    TickType_t last = xTaskGetTickCount();
+    auto previous_state = g_controller->snapshot().state;
+
+    for (;;) {
+        const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
+        sp01::InputImage inputs{};
+        esp_err_t io_err = g_io->read_inputs(inputs);
+        sp01::ControllerSnapshot snapshot{};
+        sp01::OutputImage commanded_outputs{};
+        sp01::WeightSnapshot weight{};
+
+        if (io_err != ESP_OK) {
+            g_controller->force_fault(sp01::Fault::IoFault, now);
+            snapshot = g_controller->snapshot();
+            (void)g_io->force_safe();
+            commanded_outputs = g_io->last_commanded_outputs();
+        } else {
+            inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
+                              ? sp01::OperationMode::Auto
+                              : sp01::OperationMode::Manual;
+
+            // DI7 carries the index sensor; DI8 the other four, OR-wired.
+            g_position.update(now,
+                              sp01::input(inputs, sp01::Di::PositionIndex),
+                              sp01::input(inputs, sp01::Di::PositionMark));
+            sp01::PositionSnapshot position{};
+            position.valid = g_position.usable();
+            position.angle_deg = g_position.status().angle_deg;
+            position.revolution_us = g_position.status().revolution_us;
+            g_last_position = position;
+
+            float queued = 0.0F;
+            portENTER_CRITICAL(&g_status_mux);
+            queued = g_target_pending_kg;
+            portEXIT_CRITICAL(&g_status_mux);
+            if (queued > 0.0F && spout_clear(g_controller->snapshot().state)) {
+                g_controller->set_target_kg(queued);
+                portENTER_CRITICAL(&g_status_mux);
+                g_target_pending_kg = 0.0F;
+                portEXIT_CRITICAL(&g_status_mux);
+                ESP_LOGI(kTag, "target now %.1f kg", static_cast<double>(queued));
+            }
+
+            weight = current_weight(now);
+            snapshot = g_controller->tick(now, inputs, weight, position);
+
+            sp01::OutputImage physical_outputs = snapshot.outputs;
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Prototype/shadow modes never apply normal process outputs to the board.
+            physical_outputs = sp01::safe_output_image();
+#endif
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Optional disconnected-bench one-hot pulse path.
+            std::uint8_t bench_channel = 0;
+            std::uint64_t bench_until = 0;
+            portENTER_CRITICAL(&g_status_mux);
+            bench_channel = g_bench_do_channel;
+            bench_until = g_bench_do_until_us;
+            if (bench_channel != 0 && now >= bench_until) {
+                g_bench_do_channel = 0;
+                g_bench_do_until_us = 0;
+                bench_channel = 0;
+            }
+            portEXIT_CRITICAL(&g_status_mux);
+            if (bench_channel >= 1 && bench_channel <= 8) {
+                physical_outputs.channels[bench_channel - 1] = true;
+            }
+#endif
+
+            io_err = g_io->commit_outputs(physical_outputs);
+            if (io_err != ESP_OK) {
+                (void)g_io->force_safe();
+                g_controller->force_fault(sp01::Fault::IoFault, now);
+                snapshot = g_controller->snapshot();
+            }
+            commanded_outputs = g_io->last_commanded_outputs();
+        }
+
+        portENTER_CRITICAL(&g_status_mux);
+        g_inputs = inputs;
+        g_weight_snapshot = weight;
+        g_controller_snapshot = snapshot;
+        g_commanded_outputs = commanded_outputs;
+        portEXIT_CRITICAL(&g_status_mux);
+
+        g_shifts.update(g_clock, now);
+
+        // One completed cycle is one bag; count it once, on the transition.
+        if (snapshot.state == sp01::State::Complete &&
+            snapshot.cycle_id != g_last_counted_cycle) {
+            g_last_counted_cycle = snapshot.cycle_id;
+            g_shifts.record_bag(
+                weight.net_kg,
+                snapshot.disposition == sp01::BagDisposition::Reject);
+            g_had_last_bag = true;
+            g_last_bag_kg = weight.net_kg;
+            if (g_clock.synced()) {
+                const sp01::CivilTime t = g_clock.civil(now);
+                std::snprintf(g_last_bag_time, sizeof(g_last_bag_time),
+                              "%02u:%02u:%02u", t.hour, t.minute, t.second);
+            }
+        }
+
+        {
+            sp01::HmiPublish pub{};
+            pub.snapshot = snapshot;
+            pub.explain = sp01::explain_controller(snapshot, g_controller->config(),
+                                                   inputs, weight, g_last_position,
+                                                   now);
+            pub.weight_kg = weight.net_kg;
+            pub.target_kg = g_controller->config().target_kg;
+            pub.target_pending_kg = g_target_pending_kg;
+            pub.has_last_bag = g_had_last_bag;
+            pub.last_bag_kg = g_last_bag_kg;
+            std::snprintf(pub.last_bag_time, sizeof(pub.last_bag_time), "%s",
+                          g_last_bag_time);
+            pub.time_synced = g_clock.synced();
+            pub.civil = g_clock.civil(now);
+            pub.shift_no = g_clock.shift_no(now);
+            pub.shift = g_shifts.shift();
+            pub.day = g_shifts.day();
+            pub.unattributed = g_shifts.unattributed();
+            sp01::hmi_publish(pub);
+        }
+
+        if (snapshot.state != previous_state) {
+            ESP_LOGI(kTag, "%s -> %s fault=%s",
+                     sp01::state_name(previous_state), sp01::state_name(snapshot.state),
+                     sp01::fault_name(snapshot.fault));
+            previous_state = snapshot.state;
+        }
+
+        (void)esp_task_wdt_reset();
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_CONTROL_PERIOD_MS));
+    }
+}
 
 void start_field_hotspot_if_needed() noexcept {
     if (CONFIG_SP01_WIFI_SSID[0] != '\0') {
@@ -341,10 +494,10 @@ extern "C" void app_main(void) {
                   CONFIG_SP01_MACHINE_ID);
     std::snprintf(identity.spout, sizeof(identity.spout), "%s",
                   CONFIG_SP01_SPOUT_ID);
-    const esp_app_desc_t* desc = esp_app_get_description();
-    if (desc != nullptr) {
+    const esp_app_desc_t* app_desc = esp_app_get_description();
+    if (app_desc != nullptr) {
         std::snprintf(identity.firmware, sizeof(identity.firmware), "%s",
-                      desc->version);
+                      app_desc->version);
     }
 
     sp01::HmiPins pins{};
