@@ -256,7 +256,11 @@ esp_err_t trace_handler(httpd_req_t* req) {
     static TraceEvent events[96];
     std::uint32_t lost = 0;
     std::uint32_t last = 0;
-    const std::size_t n = hmi_read_trace(since, events, 96, &lost, &last);
+    if (g_cb.read_trace == nullptr) {
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"last\":0,\"lost\":0,\"events\":[]}");
+    }
+    const std::size_t n = g_cb.read_trace(since, events, 96, &lost, &last);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
