@@ -172,6 +172,7 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
       <span class="grow"></span>
       <button class="btn" id="simRun" onclick="toggleRun()">Chạy / dừng SIMU</button>
       <button class="btn" id="clrBtn" onclick="clearFault()">Xoá lỗi</button>
+      <button class="btn danger" onclick="resetCtl()">RESET</button>
     </div>
     <div class="note" id="modeNote">Đổi nguồn cần PIN supervisor và chỉ được phép
       khi controller ở WAIT_PERMISSIVE. FULL_SW và SIMU không bao giờ điều khiển
@@ -388,6 +389,23 @@ function sendKg(){ inject('kg='+document.getElementById('injKg').value); }
 function sendDeg(){ inject('deg='+document.getElementById('injDeg').value); }
 function toggleRun(){ inject('run='+(S&&S.sim_running?'0':'1')); }
 function step(ms){ inject('step='+ms); }
+// Always available, in every mode and every state.
+async function resetCtl(){
+  let msg = 'RESET sẽ bỏ chu kỳ hiện tại và đưa output về trạng thái an toàn.';
+  if (S){
+    if (S.disposition === 'REJECT')
+      msg += '\n\nBao đang được đánh dấu LOẠI. Sau RESET controller sẽ quên '+
+             'điều đó — phải lấy bao ra khỏi vòi bằng tay.';
+    if (S.authority)
+      msg += '\n\nĐang ở REAL_HW và output có quyền thật.';
+  }
+  if (!confirm(msg + '\n\nTiếp tục?')) return;
+  if (PREVIEW) return;
+  await fetch('/api/dev/inject',{method:'POST',
+    headers:{'Content-Type':'text/plain'}, body:'reset=1'});
+  refresh();
+}
+
 async function clearFault(){
   if (PREVIEW) return;
   const r = await fetch('/api/dev/inject',{method:'POST',
