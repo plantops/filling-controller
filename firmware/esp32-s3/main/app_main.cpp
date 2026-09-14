@@ -397,18 +397,18 @@ void start_field_hotspot_if_needed() noexcept {
 
 }  // namespace
 
-namespace sp01 {
+namespace {
 // The HMI reads the trace under the same lock the control loop writes it with.
-std::size_t hmi_read_trace(std::uint32_t since_seq, TraceEvent* out,
-                           std::size_t cap, std::uint32_t* lost,
-                           std::uint32_t* last_seq) noexcept {
+std::size_t read_trace_locked(std::uint32_t since_seq, sp01::TraceEvent* out,
+                              std::size_t cap, std::uint32_t* lost,
+                              std::uint32_t* last_seq) {
     portENTER_CRITICAL(&g_status_mux);
     const std::size_t n = g_trace.since(since_seq, out, cap, lost);
     if (last_seq != nullptr) *last_seq = g_trace.last_seq();
     portEXIT_CRITICAL(&g_status_mux);
     return n;
 }
-}  // namespace sp01
+}  // namespace
 
 extern "C" void app_main(void) {
     static sp01::BoardIo io;
@@ -478,6 +478,7 @@ extern "C" void app_main(void) {
     sp01::HmiCallbacks callbacks{};
     callbacks.request_target = &on_target_request;
     callbacks.set_time = &on_browser_time;
+    callbacks.read_trace = &read_trace_locked;
 
     const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
