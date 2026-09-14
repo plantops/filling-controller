@@ -68,6 +68,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
+          command: "idf.py build 2>&1 | tee $GITHUB_WORKSPACE/idf_build.log; exit ${PIPESTATUS[0]}"
 
       - name: Publish build errors as a commit comment
         if: failure()
