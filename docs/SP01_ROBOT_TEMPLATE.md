@@ -26,6 +26,7 @@ Quy ước điền:
 | Nó làm xong một việc trong bao lâu | |
 | Nếu nó ngừng giữa chừng thì hậu quả là gì | |
 | Ai đứng cạnh nó khi nó chạy | |
+| Bộ não đặt ở đâu | |
 
 **Một câu duy nhất mô tả nhiệm vụ của nó:**
 
@@ -52,6 +53,10 @@ Mỗi đầu vào điền đủ 10 ô. Thiếu ô nào là còn chỗ để hi�
 | Mất tín hiệu thì sao | dây đứt, cảm biến hỏng → máy nên làm gì | |
 
 ### Bảng điền
+
+Liệt kê **mọi thứ robot cần biết**, không giới hạn số dòng. Đừng dừng ở tám cái vì
+board hiện tại có tám chân — nếu máy có mười hai thứ đáng biết thì viết đủ mười hai.
+Chuyện đấu vào đâu để phần 11 lo.
 
 Liệt kê **mọi** giác quan mà máy có, kể cả cái bộ não hiện chưa đọc được. Số lượng
 không bị giới hạn bởi số chân của board — chuyện đủ chân hay không là việc của
@@ -115,6 +120,10 @@ phần 11.
 | | | | | | | | |
 
 **Cơ cấu nào robot KHÔNG điều khiển nhưng có ảnh hưởng tới nó?**
+
+> 
+
+**Cơ cấu nào hiện do người bấm tay?** Nút nằm ở đâu, bấm thì cái gì xảy ra:
 
 > 
 
@@ -307,10 +316,56 @@ biệt chúng, vì đó là logic sẽ phải viết trong phần mềm.
 
 ---
 
+## 11. Đấu nối — phần duy nhất phụ thuộc phần cứng
+
+Điền **sau cùng**, khi phần 1 và 3 đã xong. Nếu số dòng ở phần 1 và 3 nhiều hơn số
+chân bộ não có, vấn đề lộ ra ở đây — và lộ ra lúc này là đúng lúc, vì còn đổi được
+board, thêm được module mở rộng, hoặc gộp tín hiệu một cách có chủ ý.
+
+| Mục | Trả lời |
+|---|---|
+| Bộ não đang dùng | |
+| Số đầu vào số có | |
+| Số đầu ra số có | |
+| Đầu vào tương tự | |
+| Đường truyền cân | |
+| Mạng | |
+
+### Gán chân — vào
+
+| Tín hiệu (số ở phần 1) | Chân | Ghi chú |
+|---|---|---|
+| | | |
+| | | |
+
+### Gán chân — ra
+
+| Cơ cấu (số ở phần 3) | Chân | Ghi chú |
+|---|---|---|
+| | | |
+| | | |
+
+### Tín hiệu phải gộp chung một chân
+
+Gộp là đánh đổi, không phải giải pháp miễn phí. Mỗi lần gộp phải trả lời được:
+robot phân biệt chúng bằng cách nào, và nếu phân biệt sai thì sao.
+
+| Các tín hiệu gộp | Gộp vào chân | Phân biệt bằng cách nào | Nếu nhầm thì sao |
+|---|---|---|---|
+| | | | |
+
+### Tín hiệu không đủ chân
+
+| Tín hiệu | Vì sao cần | Phương án |
+|---|---|---|
+| | | |
+
+---
+
 ## Cách dùng bản này
 
 1. Điền phần 1, 2, 3 trước — giác quan và cơ bắp. Đây là sự thật vật lý, đo được,
-   không tranh cãi.
+   không tranh cãi. **Liệt kê theo cái máy cần, không theo số chân đang có.**
 2. Phần 4 đo bằng cách quay tay và ghi lại.
 3. Phần 5, 6 viết bằng lời, không dùng thuật ngữ phần mềm.
 4. Phần 7, 8 hỏi người vận hành lâu năm — họ biết máy hỏng kiểu gì.
