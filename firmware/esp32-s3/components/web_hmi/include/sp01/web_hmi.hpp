@@ -55,6 +55,13 @@ struct HmiPublish {
     ShiftCounters shift{};
     ShiftCounters day{};
     ShiftCounters unattributed{};
+
+    // Commissioning source state, so the page never has to guess.
+    RunMode source_mode{RunMode::RealHw};
+    bool output_authority{false};
+    bool sim_running{true};
+    float manual_weight_kg{0.0F};
+    float manual_angle_deg{0.0F};
 };
 
 enum class HmiResult : std::uint8_t { Ok = 0, BadPin, Locked, Rejected };
