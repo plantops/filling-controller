@@ -68,7 +68,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: firmware/esp32-s3
-          command: "idf.py build 2>&1 | tee $GITHUB_WORKSPACE/idf_build.log; exit ${PIPESTATUS[0]}"
+          command: "idf.py build > idf_build.log 2>&1; rc=$?; tail -c 4000 idf_build.log; exit $rc"
 
       - name: Publish build errors as a commit comment
         if: failure()
@@ -77,8 +77,12 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          LOG="$GITHUB_WORKSPACE/idf_build.log"
-          [ -f "$LOG" ] || { echo "no build log produced"; exit 0; }
+          LOG="$GITHUB_WORKSPACE/firmware/esp32-s3/idf_build.log"
+          if [ ! -f "$LOG" ]; then
+            echo "no build log at $LOG; searching workspace"
+            LOG=$(find "$GITHUB_WORKSPACE" -name idf_build.log -print -quit 2>/dev/null)
+          fi
+          [ -n "$LOG" ] && [ -f "$LOG" ] || { echo "no build log produced"; exit 0; }
           ERRS=$(grep -nE "error:|Error |CMake Error|undefined reference|fatal error" "$LOG" | head -40 || true)
           TAIL=$(tail -n 60 "$LOG")
           BODY=$(printf 'ESP32-S3 build failed on run %s.\n\n### Errors\n```\n%s\n```\n\n### Log tail\n```\n%s\n```\n' \
