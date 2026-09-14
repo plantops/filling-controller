@@ -289,6 +289,69 @@ esp_err_t trace_handler(httpd_req_t* req) {
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
 
+// POST /api/dev/mode   mode=REAL_HW|FULL_SW|SIMU & pin=<supervisor 6 digits>
+esp_err_t mode_handler(httpd_req_t* req) {
+    char body[96];
+    if (!read_body(req, body, sizeof(body))) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "mode and pin required");
+        return ESP_FAIL;
+    }
+    char mode_text[16];
+    char pin[16];
+    if (!field(body, "mode", mode_text, sizeof(mode_text)) ||
+        !field(body, "pin", pin, sizeof(pin))) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "mode and pin required");
+        return ESP_FAIL;
+    }
+
+    RunMode next = RunMode::RealHw;
+    if (std::strcmp(mode_text, "FULL_SW") == 0) next = RunMode::FullSw;
+    else if (std::strcmp(mode_text, "SIMU") == 0) next = RunMode::Simu;
+    else if (std::strcmp(mode_text, "REAL_HW") != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown mode");
+        return ESP_FAIL;
+    }
+
+    const bool pin_ok = std::strcmp(pin, g_pins.supervisor_pin) == 0;
+    if (g_cb.request_mode == nullptr) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no handler");
+        return ESP_FAIL;
+    }
+    const ModeChange r = g_cb.request_mode(next, pin_ok);
+    if (r == ModeChange::Ok || r == ModeChange::Unchanged) {
+        ESP_LOGW(kTag, "input source is now %s", run_mode_name(next));
+        return httpd_resp_sendstr(req, mode_change_name(r));
+    }
+    httpd_resp_set_status(req, r == ModeChange::BadPin ? "403 Forbidden"
+                                                       : "409 Conflict");
+    return httpd_resp_sendstr(req, mode_change_name(r));
+}
+
+// Manual injection, only meaningful in FULL_SW; the source ignores it otherwise.
+esp_err_t inject_handler(httpd_req_t* req) {
+    char body[96];
+    if (!read_body(req, body, sizeof(body))) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nothing to set");
+        return ESP_FAIL;
+    }
+    char v[24];
+    if (field(body, "di", v, sizeof(v)) && g_cb.set_manual_di != nullptr) {
+        char val[8];
+        const bool on = field(body, "v", val, sizeof(val)) && val[0] == '1';
+        g_cb.set_manual_di(static_cast<std::uint8_t>(std::atoi(v)), on);
+    }
+    if (field(body, "kg", v, sizeof(v)) && g_cb.set_manual_weight != nullptr) {
+        g_cb.set_manual_weight(std::strtof(v, nullptr));
+    }
+    if (field(body, "deg", v, sizeof(v)) && g_cb.set_manual_angle != nullptr) {
+        g_cb.set_manual_angle(std::strtof(v, nullptr));
+    }
+    if (field(body, "run", v, sizeof(v)) && g_cb.set_sim_running != nullptr) {
+        g_cb.set_sim_running(v[0] == '1');
+    }
+    return httpd_resp_sendstr(req, "ok");
+}
+
 esp_err_t time_handler(httpd_req_t* req) {
     char body[96];
     if (!read_body(req, body, sizeof(body))) {
@@ -339,6 +402,8 @@ esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins, const HmiC
         {"/api/op/target", HTTP_POST, target_handler, nullptr},
         {"/api/time", HTTP_POST, time_handler, nullptr},
         {"/api/trace", HTTP_GET, trace_handler, nullptr},
+        {"/api/dev/mode", HTTP_POST, mode_handler, nullptr},
+        {"/api/dev/inject", HTTP_POST, inject_handler, nullptr},
     };
     for (const auto& r : routes) {
         err = httpd_register_uri_handler(g_server, &r);
