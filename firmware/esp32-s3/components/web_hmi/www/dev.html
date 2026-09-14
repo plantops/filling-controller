@@ -171,6 +171,7 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
       <button class="btn" id="mSIMU" onclick="askMode('SIMU')">SIMU</button>
       <span class="grow"></span>
       <button class="btn" id="simRun" onclick="toggleRun()">Chạy / dừng SIMU</button>
+      <button class="btn" id="clrBtn" onclick="clearFault()">Xoá lỗi</button>
     </div>
     <div class="note" id="modeNote">Đổi nguồn cần PIN supervisor và chỉ được phép
       khi controller ở WAIT_PERMISSIVE. FULL_SW và SIMU không bao giờ điều khiển
@@ -387,6 +388,14 @@ function sendKg(){ inject('kg='+document.getElementById('injKg').value); }
 function sendDeg(){ inject('deg='+document.getElementById('injDeg').value); }
 function toggleRun(){ inject('run='+(S&&S.sim_running?'0':'1')); }
 function step(ms){ inject('step='+ms); }
+async function clearFault(){
+  if (PREVIEW) return;
+  const r = await fetch('/api/dev/inject',{method:'POST',
+    headers:{'Content-Type':'text/plain'}, body:'clear=1'});
+  if (!r.ok) alert('Không xoá được lỗi. Tắt DI4 initiative, và nếu bao đã bị '+
+                   'loại thì phải lấy bao ra khỏi vòi trước.');
+  refresh();
+}
 function setWin(s){ win=s; document.getElementById('win').textContent=s; }
 function toggleFreeze(){
   frozen=!frozen;
@@ -414,6 +423,7 @@ function render(s){
   document.getElementById('state').textContent = s.state;
   document.getElementById('fault').textContent = s.fault;
   document.getElementById('faultCard').classList.toggle('alarm', s.fault!=='NONE');
+  document.getElementById('clrBtn').disabled = s.fault==='NONE';
   document.getElementById('angle').textContent =
     s.position.valid ? s.position.angle_deg.toFixed(1)+'°' : '—';
   document.getElementById('posnote').textContent =
