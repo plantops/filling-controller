@@ -369,6 +369,9 @@ esp_err_t inject_handler(httpd_req_t* req) {
     if (field(body, "deg", v, sizeof(v)) && g_cb.set_manual_angle != nullptr) {
         g_cb.set_manual_angle(std::strtof(v, nullptr));
     }
+    if (field(body, "step", v, sizeof(v)) && g_cb.step_ms != nullptr) {
+        g_cb.step_ms(static_cast<std::uint32_t>(std::atoi(v)));
+    }
     if (field(body, "run", v, sizeof(v)) && g_cb.set_sim_running != nullptr) {
         g_cb.set_sim_running(v[0] == '1');
     }
