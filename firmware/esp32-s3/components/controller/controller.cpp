@@ -91,6 +91,14 @@ void Controller::force_fault(Fault code, std::uint64_t now_us) noexcept {
 bool Controller::clear_fault(std::uint64_t now_us, const InputImage& inputs) noexcept {
     if (snapshot_.state != State::Fault) return true;
     if (input(inputs, Di::ProcessInitiative)) return false;
+    // A bag already latched as reject is still physically on the spout. Clearing
+    // here would reset the disposition and the next cycle would treat it as a
+    // fresh bag: filled again, or discharged as good. The operator must take it
+    // off first.
+    if (snapshot_.disposition == BagDisposition::Reject &&
+        input(inputs, Di::BagPresent)) {
+        return false;
+    }
     reset(now_us);
     snapshot_.mode = inputs.mode;
     return true;
