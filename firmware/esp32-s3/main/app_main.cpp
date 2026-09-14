@@ -3,6 +3,7 @@
 #include "sp01/controller_explain.hpp"
 #include "sp01/position_decoder.hpp"
 #include "sp01/time_shift.hpp"
+#include "sp01/trace.hpp"
 #include "sp01/tlb485.hpp"
 #include "sp01/web_hmi.hpp"
 
@@ -40,6 +41,12 @@ sp01::PositionDecoder g_position{};
 sp01::PositionSnapshot g_last_position{};
 sp01::TimeKeeper g_clock{};
 sp01::ShiftTracker g_shifts{};
+
+// Edges are recorded here, at tick rate, so a 20 ms output pulse is still
+// visible to the HMI minutes later. The browser used to diff two polls 300 ms
+// apart, which cannot see a pulse narrower than the poll.
+sp01::TraceBuffer g_trace{};
+sp01::TraceRecorder g_recorder{};
 
 float g_target_pending_kg = 0.0F;
 bool g_had_last_bag = false;
@@ -292,6 +299,15 @@ void control_task(void*) {
         g_commanded_outputs = commanded_outputs;
         portEXIT_CRITICAL(&g_status_mux);
 
+        {
+            portENTER_CRITICAL(&g_status_mux);
+            g_recorder.observe(now, inputs, snapshot, commanded_outputs,
+                               g_last_position.valid, g_trace);
+            g_recorder.observe_target(now, g_controller->config().target_kg,
+                                      g_trace);
+            portEXIT_CRITICAL(&g_status_mux);
+        }
+
         g_shifts.update(g_clock, now);
         if (snapshot.state == sp01::State::Complete && snapshot.cycle_id != g_last_counted_cycle) {
             g_last_counted_cycle = snapshot.cycle_id;
@@ -380,6 +396,19 @@ void start_field_hotspot_if_needed() noexcept {
 }
 
 }  // namespace
+
+namespace sp01 {
+// The HMI reads the trace under the same lock the control loop writes it with.
+std::size_t hmi_read_trace(std::uint32_t since_seq, TraceEvent* out,
+                           std::size_t cap, std::uint32_t* lost,
+                           std::uint32_t* last_seq) noexcept {
+    portENTER_CRITICAL(&g_status_mux);
+    const std::size_t n = g_trace.since(since_seq, out, cap, lost);
+    if (last_seq != nullptr) *last_seq = g_trace.last_seq();
+    portEXIT_CRITICAL(&g_status_mux);
+    return n;
+}
+}  // namespace sp01
 
 extern "C" void app_main(void) {
     static sp01::BoardIo io;
