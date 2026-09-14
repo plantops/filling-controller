@@ -55,6 +55,13 @@ sp01::TraceRecorder g_recorder{};
 sp01::TestSource g_source{};
 std::uint64_t g_prev_tick_us = 0;
 
+// FULL_SW drives the controller from a stepped clock. Controller timeouts stay
+// at their real values, but time only moves when the operator asks, so a cycle
+// can be inspected one transition at a time instead of racing a 12 s coarse-fill
+// timeout. REAL_HW and SIMU use the monotonic clock as before.
+std::uint64_t g_sw_clock_us = 0;
+std::uint64_t g_sw_step_pending_us = 0;
+
 float g_target_pending_kg = 0.0F;
 bool g_had_last_bag = false;
 float g_last_bag_kg = 0.0F;
@@ -258,13 +265,29 @@ void control_task(void*) {
             hw.position.revolution_us = g_position.status().revolution_us;
             hw.weight = current_weight(now);
 
-            const std::uint64_t dt = (g_prev_tick_us != 0 && now > g_prev_tick_us)
-                                         ? now - g_prev_tick_us
-                                         : 0;
+            std::uint64_t dt = (g_prev_tick_us != 0 && now > g_prev_tick_us)
+                                   ? now - g_prev_tick_us
+                                   : 0;
             g_prev_tick_us = now;
 
+            if (g_source.mode() == sp01::RunMode::FullSw) {
+                // Only the step the operator asked for; otherwise time stands
+                // still and nothing times out while they look at it.
+                std::uint64_t step = 0;
+                portENTER_CRITICAL(&g_status_mux);
+                step = g_sw_step_pending_us;
+                g_sw_step_pending_us = 0;
+                portEXIT_CRITICAL(&g_status_mux);
+                g_sw_clock_us += step;
+                dt = step;
+            } else {
+                g_sw_clock_us = now;
+            }
+            // The clock the controller, the source and the trace all share.
+            const std::uint64_t ctl_now = g_sw_clock_us;
+
             const sp01::SourceImages src = g_source.apply(
-                now, dt, hw, g_controller->snapshot().state);
+                ctl_now, dt, hw, g_controller->snapshot().state);
             inputs = src.inputs;
             const sp01::PositionSnapshot position = src.position;
             g_last_position = position;
@@ -282,7 +305,7 @@ void control_task(void*) {
             }
 
             weight = src.weight;
-            snapshot = g_controller->tick(now, inputs, weight, position);
+            snapshot = g_controller->tick(ctl_now, inputs, weight, position);
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
 #if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
@@ -325,9 +348,9 @@ void control_task(void*) {
 
         {
             portENTER_CRITICAL(&g_status_mux);
-            g_recorder.observe(now, inputs, snapshot, commanded_outputs,
+            g_recorder.observe(g_sw_clock_us, inputs, snapshot, commanded_outputs,
                                g_last_position.valid, g_trace);
-            g_recorder.observe_target(now, g_controller->config().target_kg,
+            g_recorder.observe_target(g_sw_clock_us, g_controller->config().target_kg,
                                       g_trace);
             portEXIT_CRITICAL(&g_status_mux);
         }
@@ -449,6 +472,12 @@ void on_set_manual_weight(float kg) { g_source.set_weight_kg(kg); }
 void on_set_manual_angle(float deg) { g_source.set_angle_deg(deg); }
 void on_set_sim_running(bool running) { g_source.set_running(running); }
 
+void on_step_ms(std::uint32_t ms) {
+    portENTER_CRITICAL(&g_status_mux);
+    g_sw_step_pending_us += static_cast<std::uint64_t>(ms) * 1000ULL;
+    portEXIT_CRITICAL(&g_status_mux);
+}
+
 std::size_t read_trace_locked(std::uint32_t since_seq, sp01::TraceEvent* out,
                               std::size_t cap, std::uint32_t* lost,
                               std::uint32_t* last_seq) {
@@ -534,6 +563,7 @@ extern "C" void app_main(void) {
     callbacks.set_manual_weight = &on_set_manual_weight;
     callbacks.set_manual_angle = &on_set_manual_angle;
     callbacks.set_sim_running = &on_set_sim_running;
+    callbacks.step_ms = &on_step_ms;
 
     const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
