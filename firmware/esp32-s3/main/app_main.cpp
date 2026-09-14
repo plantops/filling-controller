@@ -36,15 +36,11 @@ sp01::WeightSnapshot g_weight_snapshot{};
 sp01::ControllerSnapshot g_controller_snapshot{};
 sp01::OutputImage g_commanded_outputs{};
 
-// Position, clock and shift accounting sit beside the controller so every value
-// the HMI shows is computed in firmware, never re-derived in the browser.
 sp01::PositionDecoder g_position{};
 sp01::PositionSnapshot g_last_position{};
 sp01::TimeKeeper g_clock{};
 sp01::ShiftTracker g_shifts{};
 
-// A target accepted over the HMI waits here until the spout is clear: applying
-// it mid-fill would give one bag two different cutoff thresholds.
 float g_target_pending_kg = 0.0F;
 bool g_had_last_bag = false;
 float g_last_bag_kg = 0.0F;
@@ -67,17 +63,16 @@ sp01::HmiResult on_target_request(float kg) {
     portENTER_CRITICAL(&g_status_mux);
     g_target_pending_kg = kg;
     portEXIT_CRITICAL(&g_status_mux);
-    ESP_LOGI(kTag, "target %.1f kg queued until the spout is clear",
-             static_cast<double>(kg));
+    ESP_LOGI(kTag, "target %.1f kg queued until the spout is clear", static_cast<double>(kg));
     return sp01::HmiResult::Ok;
 }
 
 void on_browser_time(std::uint64_t unix_ms, std::int16_t tz_offset_min) {
     const bool first = !g_clock.synced();
-    g_clock.sync_from_browser(static_cast<std::uint64_t>(esp_timer_get_time()),
-                              unix_ms, tz_offset_min);
+    g_clock.sync_from_browser(static_cast<std::uint64_t>(esp_timer_get_time()), unix_ms, tz_offset_min);
     if (first) ESP_LOGI(kTag, "clock synced from browser");
 }
+
 sp01::ControllerConfig g_controller_config{};
 std::uint8_t g_bench_do_channel = 0;
 std::uint64_t g_bench_do_until_us = 0;
@@ -102,7 +97,6 @@ sp01::ControllerConfig make_controller_config() noexcept {
     c.settle_min_us = static_cast<std::uint64_t>(CONFIG_SP01_SETTLE_MIN_MS) * 1000ULL;
     c.wait_discharge_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_WAIT_DISCHARGE_TIMEOUT_MS) * 1000ULL;
     c.push_duration_us = static_cast<std::uint64_t>(CONFIG_SP01_PUSH_DURATION_MS) * 1000ULL;
-    // Push points are angles now; the plant is discussed in degrees.
     c.discharge_angle_deg = static_cast<float>(CONFIG_SP01_DISCHARGE_ANGLE_DEG);
     c.reject_angle_deg = static_cast<float>(CONFIG_SP01_REJECT_ANGLE_DEG);
     c.discharge_lead_deg = static_cast<float>(CONFIG_SP01_DISCHARGE_LEAD_DEG);
@@ -124,14 +118,10 @@ void log_build_and_config_identity() noexcept {
         ESP_LOGI(kTag,
                  "build project=%s version=%s idf=%s elf_sha256=%02x%02x%02x%02x%02x%02x%02x%02x reset_reason=%d",
                  app->project_name, app->version, app->idf_ver,
-                 static_cast<unsigned>(app->app_elf_sha256[0]),
-                 static_cast<unsigned>(app->app_elf_sha256[1]),
-                 static_cast<unsigned>(app->app_elf_sha256[2]),
-                 static_cast<unsigned>(app->app_elf_sha256[3]),
-                 static_cast<unsigned>(app->app_elf_sha256[4]),
-                 static_cast<unsigned>(app->app_elf_sha256[5]),
-                 static_cast<unsigned>(app->app_elf_sha256[6]),
-                 static_cast<unsigned>(app->app_elf_sha256[7]),
+                 static_cast<unsigned>(app->app_elf_sha256[0]), static_cast<unsigned>(app->app_elf_sha256[1]),
+                 static_cast<unsigned>(app->app_elf_sha256[2]), static_cast<unsigned>(app->app_elf_sha256[3]),
+                 static_cast<unsigned>(app->app_elf_sha256[4]), static_cast<unsigned>(app->app_elf_sha256[5]),
+                 static_cast<unsigned>(app->app_elf_sha256[6]), static_cast<unsigned>(app->app_elf_sha256[7]),
                  static_cast<int>(esp_reset_reason()));
     }
     ESP_LOGI(kTag,
@@ -161,7 +151,6 @@ void log_build_and_config_identity() noexcept {
 sp01::WeightSnapshot dummy_weight(std::uint64_t now_us, sp01::State state) noexcept {
     constexpr float kCoarseStepKg = 0.20F;
     constexpr float kFineStepKg = 0.05F;
-
     bool stable = true;
     switch (state) {
         case sp01::State::WaitPermissive:
@@ -171,30 +160,20 @@ sp01::WeightSnapshot dummy_weight(std::uint64_t now_us, sp01::State state) noexc
         case sp01::State::TareReady:
             g_dummy_weight_kg = 0.0F;
             break;
-
         case sp01::State::CoarseFill:
             stable = false;
             g_dummy_weight_kg += kCoarseStepKg;
-            if (g_dummy_weight_kg > g_controller_config.coarse_to_fine_kg) {
-                g_dummy_weight_kg = g_controller_config.coarse_to_fine_kg;
-            }
+            if (g_dummy_weight_kg > g_controller_config.coarse_to_fine_kg) g_dummy_weight_kg = g_controller_config.coarse_to_fine_kg;
             break;
-
         case sp01::State::FineFill:
             stable = false;
             g_dummy_weight_kg += kFineStepKg;
-            if (g_dummy_weight_kg > g_controller_config.target_kg) {
-                g_dummy_weight_kg = g_controller_config.target_kg;
-            }
+            if (g_dummy_weight_kg > g_controller_config.target_kg) g_dummy_weight_kg = g_controller_config.target_kg;
             break;
-
         case sp01::State::Cutoff:
             stable = false;
-            if (g_dummy_weight_kg < g_controller_config.target_kg) {
-                g_dummy_weight_kg = g_controller_config.target_kg;
-            }
+            if (g_dummy_weight_kg < g_controller_config.target_kg) g_dummy_weight_kg = g_controller_config.target_kg;
             break;
-
         case sp01::State::Settle:
         case sp01::State::RejectWait:
         case sp01::State::WaitDischarge:
@@ -203,7 +182,6 @@ sp01::WeightSnapshot dummy_weight(std::uint64_t now_us, sp01::State state) noexc
         case sp01::State::Fault:
             break;
     }
-
     sp01::WeightSnapshot w{};
     w.net_kg = g_dummy_weight_kg;
     w.sample_time_us = now_us;
@@ -224,15 +202,6 @@ sp01::WeightSnapshot current_weight(std::uint64_t now_us) noexcept {
     return {};
 #endif
 }
-
-bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
-    if (weight.quality != sp01::WeightQuality::Good) return false;
-    const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-    return weight.sample_time_us <= now && now - weight.sample_time_us <= g_controller_config.weight_stale_us;
-}
-
-// The HMI is no longer polled: the control loop pushes one coherent picture
-// each tick via hmi_publish(), produced beside the controller.
 
 #if CONFIG_SP01_TLB_ENABLE
 void weighing_task(void*) {
@@ -265,14 +234,9 @@ void control_task(void*) {
             (void)g_io->force_safe();
             commanded_outputs = g_io->last_commanded_outputs();
         } else {
-            inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
-                              ? sp01::OperationMode::Auto
-                              : sp01::OperationMode::Manual;
+            inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning) ? sp01::OperationMode::Auto : sp01::OperationMode::Manual;
 
-            // DI7 carries the index sensor; DI8 the other four, OR-wired.
-            g_position.update(now,
-                              sp01::input(inputs, sp01::Di::PositionIndex),
-                              sp01::input(inputs, sp01::Di::PositionMark));
+            g_position.update(now, sp01::input(inputs, sp01::Di::PositionIndex), sp01::input(inputs, sp01::Di::PositionMark));
             sp01::PositionSnapshot position{};
             position.valid = g_position.usable();
             position.angle_deg = g_position.status().angle_deg;
@@ -296,11 +260,9 @@ void control_task(void*) {
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
 #if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // Prototype/shadow modes never apply normal process outputs to the board.
             physical_outputs = sp01::safe_output_image();
 #endif
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // Optional disconnected-bench one-hot pulse path.
             std::uint8_t bench_channel = 0;
             std::uint64_t bench_until = 0;
             portENTER_CRITICAL(&g_status_mux);
@@ -312,11 +274,8 @@ void control_task(void*) {
                 bench_channel = 0;
             }
             portEXIT_CRITICAL(&g_status_mux);
-            if (bench_channel >= 1 && bench_channel <= 8) {
-                physical_outputs.channels[bench_channel - 1] = true;
-            }
+            if (bench_channel >= 1 && bench_channel <= 8) physical_outputs.channels[bench_channel - 1] = true;
 #endif
-
             io_err = g_io->commit_outputs(physical_outputs);
             if (io_err != ESP_OK) {
                 (void)g_io->force_safe();
@@ -334,36 +293,36 @@ void control_task(void*) {
         portEXIT_CRITICAL(&g_status_mux);
 
         g_shifts.update(g_clock, now);
-
-        // One completed cycle is one bag; count it once, on the transition.
-        if (snapshot.state == sp01::State::Complete &&
-            snapshot.cycle_id != g_last_counted_cycle) {
+        if (snapshot.state == sp01::State::Complete && snapshot.cycle_id != g_last_counted_cycle) {
             g_last_counted_cycle = snapshot.cycle_id;
-            g_shifts.record_bag(
-                weight.net_kg,
-                snapshot.disposition == sp01::BagDisposition::Reject);
+            g_shifts.record_bag(weight.net_kg, snapshot.disposition == sp01::BagDisposition::Reject);
             g_had_last_bag = true;
             g_last_bag_kg = weight.net_kg;
             if (g_clock.synced()) {
                 const sp01::CivilTime t = g_clock.civil(now);
-                std::snprintf(g_last_bag_time, sizeof(g_last_bag_time),
-                              "%02u:%02u:%02u", t.hour, t.minute, t.second);
+                std::snprintf(g_last_bag_time, sizeof(g_last_bag_time), "%02u:%02u:%02u", t.hour, t.minute, t.second);
             }
         }
 
         {
             sp01::HmiPublish pub{};
             pub.snapshot = snapshot;
-            pub.explain = sp01::explain_controller(snapshot, g_controller->config(),
-                                                   inputs, weight, g_last_position,
-                                                   now);
+            pub.explain = sp01::explain_controller(snapshot, g_controller->config(), inputs, weight, g_last_position, now);
+            pub.inputs = inputs;
+            pub.weight = weight;
+            pub.commanded_outputs = commanded_outputs;
+            pub.position = g_last_position;
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            pub.shadow_mode = true;
+#else
+            pub.shadow_mode = false;
+#endif
             pub.weight_kg = weight.net_kg;
             pub.target_kg = g_controller->config().target_kg;
             pub.target_pending_kg = g_target_pending_kg;
             pub.has_last_bag = g_had_last_bag;
             pub.last_bag_kg = g_last_bag_kg;
-            std::snprintf(pub.last_bag_time, sizeof(pub.last_bag_time), "%s",
-                          g_last_bag_time);
+            std::snprintf(pub.last_bag_time, sizeof(pub.last_bag_time), "%s", g_last_bag_time);
             pub.time_synced = g_clock.synced();
             pub.civil = g_clock.civil(now);
             pub.shift_no = g_clock.shift_no(now);
@@ -374,12 +333,9 @@ void control_task(void*) {
         }
 
         if (snapshot.state != previous_state) {
-            ESP_LOGI(kTag, "%s -> %s fault=%s",
-                     sp01::state_name(previous_state), sp01::state_name(snapshot.state),
-                     sp01::fault_name(snapshot.fault));
+            ESP_LOGI(kTag, "%s -> %s fault=%s", sp01::state_name(previous_state), sp01::state_name(snapshot.state), sp01::fault_name(snapshot.fault));
             previous_state = snapshot.state;
         }
-
         (void)esp_task_wdt_reset();
         vTaskDelayUntil(&last, pdMS_TO_TICKS(CONFIG_SP01_CONTROL_PERIOD_MS));
     }
@@ -390,28 +346,24 @@ void start_field_hotspot_if_needed() noexcept {
         ESP_LOGI(kTag, "Field hotspot skipped: configured Wi-Fi STA is enabled");
         return;
     }
-
     esp_netif_t* ap_netif = esp_netif_create_default_wifi_ap();
     if (!ap_netif) {
         ESP_LOGW(kTag, "Field hotspot unavailable: AP netif create failed");
         return;
     }
     (void)esp_netif_set_hostname(ap_netif, "sp01-ap");
-
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t err = esp_wifi_init(&init);
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "Field hotspot unavailable: Wi-Fi init failed: %s", esp_err_to_name(err));
         return;
     }
-
     wifi_config_t ap{};
     std::snprintf(reinterpret_cast<char*>(ap.ap.ssid), sizeof(ap.ap.ssid), "%s", kFieldApSsid);
     std::snprintf(reinterpret_cast<char*>(ap.ap.password), sizeof(ap.ap.password), "%s", kFieldApPassword);
     ap.ap.channel = 1;
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
-
     err = esp_wifi_set_mode(WIFI_MODE_AP);
     if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_AP, &ap);
     if (err == ESP_OK) err = esp_wifi_start();
@@ -419,7 +371,6 @@ void start_field_hotspot_if_needed() noexcept {
         ESP_LOGW(kTag, "Field hotspot unavailable: %s", esp_err_to_name(err));
         return;
     }
-
     esp_netif_ip_info_t ip{};
     if (esp_netif_get_ip_info(ap_netif, &ip) == ESP_OK) {
         ESP_LOGI(kTag, "FIELD HOTSPOT READY: SSID=%s HMI=http://" IPSTR, kFieldApSsid, IP2STR(&ip.ip));
@@ -435,29 +386,24 @@ extern "C" void app_main(void) {
     static sp01::Tlb485 tlb;
     g_controller_config = make_controller_config();
     if (!valid_broken_bag_config(g_controller_config)) {
-        ESP_LOGE(kTag,
-                 "invalid broken-bag config: loss trip, persistence and reject timeout must be all zero or all non-zero");
+        ESP_LOGE(kTag, "invalid broken-bag config: loss trip, persistence and reject timeout must be all zero or all non-zero");
         ESP_ERROR_CHECK(ESP_ERR_INVALID_ARG);
     }
     static sp01::Controller controller(g_controller_config);
-
     g_io = &io;
     g_tlb = &tlb;
     g_controller = &controller;
 
     ESP_LOGI(kTag, "SP01 v0.1 ESP-IDF/C++ controller");
     log_build_and_config_identity();
-    if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) {
-        ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
-    }
+    if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
 #if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
     ESP_LOGW(kTag, "FIELD PROTOTYPE SHADOW: dummy weight active; normal process DO suppressed");
 #endif
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
     ESP_LOGW(kTag, "G2 BENCH MODE: normal process outputs suppressed; HMI one-hot DO pulse only");
 #endif
-    ESP_ERROR_CHECK(io.init(static_cast<std::uint8_t>(CONFIG_SP01_DI_INVERT_MASK),
-                            static_cast<std::uint8_t>(CONFIG_SP01_DO_INVERT_MASK)));
+    ESP_ERROR_CHECK(io.init(static_cast<std::uint8_t>(CONFIG_SP01_DI_INVERT_MASK), static_cast<std::uint8_t>(CONFIG_SP01_DO_INVERT_MASK)));
     ESP_ERROR_CHECK(io.force_safe());
 
 #if CONFIG_SP01_TLB_ENABLE
@@ -491,21 +437,14 @@ extern "C" void app_main(void) {
     }
 
     sp01::HmiIdentity identity{};
-    std::snprintf(identity.machine, sizeof(identity.machine), "%s",
-                  CONFIG_SP01_MACHINE_ID);
-    std::snprintf(identity.spout, sizeof(identity.spout), "%s",
-                  CONFIG_SP01_SPOUT_ID);
+    std::snprintf(identity.machine, sizeof(identity.machine), "%s", CONFIG_SP01_MACHINE_ID);
+    std::snprintf(identity.spout, sizeof(identity.spout), "%s", CONFIG_SP01_SPOUT_ID);
     const esp_app_desc_t* app_desc = esp_app_get_description();
-    if (app_desc != nullptr) {
-        std::snprintf(identity.firmware, sizeof(identity.firmware), "%s",
-                      app_desc->version);
-    }
+    if (app_desc != nullptr) std::snprintf(identity.firmware, sizeof(identity.firmware), "%s", app_desc->version);
 
     sp01::HmiPins pins{};
-    std::snprintf(pins.operator_pin, sizeof(pins.operator_pin), "%s",
-                  CONFIG_SP01_OPERATOR_PIN);
-    std::snprintf(pins.supervisor_pin, sizeof(pins.supervisor_pin), "%s",
-                  CONFIG_SP01_SUPERVISOR_PIN);
+    std::snprintf(pins.operator_pin, sizeof(pins.operator_pin), "%s", CONFIG_SP01_OPERATOR_PIN);
+    std::snprintf(pins.supervisor_pin, sizeof(pins.supervisor_pin), "%s", CONFIG_SP01_SUPERVISOR_PIN);
 
     sp01::HmiCallbacks callbacks{};
     callbacks.request_target = &on_target_request;
