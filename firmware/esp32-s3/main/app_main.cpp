@@ -3,6 +3,7 @@
 #include "sp01/controller_explain.hpp"
 #include "sp01/position_decoder.hpp"
 #include "sp01/time_shift.hpp"
+#include "sp01/test_source.hpp"
 #include "sp01/trace.hpp"
 #include "sp01/tlb485.hpp"
 #include "sp01/web_hmi.hpp"
@@ -47,6 +48,12 @@ sp01::ShiftTracker g_shifts{};
 // apart, which cannot see a pulse narrower than the poll.
 sp01::TraceBuffer g_trace{};
 sp01::TraceRecorder g_recorder{};
+
+// Where the controller's inputs come from. REAL_HW by default; FULL_SW and SIMU
+// can never hold physical output authority, which is enforced below rather than
+// left to the UI.
+sp01::TestSource g_source{};
+std::uint64_t g_prev_tick_us = 0;
 
 float g_target_pending_kg = 0.0F;
 bool g_had_last_bag = false;
@@ -244,10 +251,22 @@ void control_task(void*) {
             inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning) ? sp01::OperationMode::Auto : sp01::OperationMode::Manual;
 
             g_position.update(now, sp01::input(inputs, sp01::Di::PositionIndex), sp01::input(inputs, sp01::Di::PositionMark));
-            sp01::PositionSnapshot position{};
-            position.valid = g_position.usable();
-            position.angle_deg = g_position.status().angle_deg;
-            position.revolution_us = g_position.status().revolution_us;
+            sp01::SourceImages hw{};
+            hw.inputs = inputs;
+            hw.position.valid = g_position.usable();
+            hw.position.angle_deg = g_position.status().angle_deg;
+            hw.position.revolution_us = g_position.status().revolution_us;
+            hw.weight = current_weight(now);
+
+            const std::uint64_t dt = (g_prev_tick_us != 0 && now > g_prev_tick_us)
+                                         ? now - g_prev_tick_us
+                                         : 0;
+            g_prev_tick_us = now;
+
+            const sp01::SourceImages src = g_source.apply(
+                now, dt, hw, g_controller->snapshot().state);
+            inputs = src.inputs;
+            const sp01::PositionSnapshot position = src.position;
             g_last_position = position;
 
             float queued = 0.0F;
@@ -262,13 +281,18 @@ void control_task(void*) {
                 ESP_LOGI(kTag, "target now %.1f kg", static_cast<double>(queued));
             }
 
-            weight = current_weight(now);
+            weight = src.weight;
             snapshot = g_controller->tick(now, inputs, weight, position);
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
 #if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
             physical_outputs = sp01::safe_output_image();
 #endif
+            // No setting opens this. FULL_SW and SIMU exist for when nobody is
+            // standing at the machine, so they never reach a physical output.
+            if (!g_source.output_authority_possible()) {
+                physical_outputs = sp01::safe_output_image();
+            }
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
             std::uint8_t bench_channel = 0;
             std::uint64_t bench_until = 0;
@@ -399,6 +423,27 @@ void start_field_hotspot_if_needed() noexcept {
 
 namespace {
 // The HMI reads the trace under the same lock the control loop writes it with.
+sp01::ModeChange on_request_mode(sp01::RunMode next, bool pin_ok) {
+    portENTER_CRITICAL(&g_status_mux);
+    const sp01::State state = g_controller_snapshot.state;
+    portEXIT_CRITICAL(&g_status_mux);
+    const sp01::ModeChange r = g_source.request_mode(next, state, pin_ok);
+    if (r == sp01::ModeChange::Ok) {
+        ESP_LOGW(kTag, "INPUT SOURCE -> %s (physical outputs %s)",
+                 sp01::run_mode_name(next),
+                 g_source.output_authority_possible() ? "as configured"
+                                                      : "LOCKED SAFE");
+    }
+    return r;
+}
+
+void on_set_manual_di(std::uint8_t channel, bool value) {
+    g_source.set_di(channel, value);
+}
+void on_set_manual_weight(float kg) { g_source.set_weight_kg(kg); }
+void on_set_manual_angle(float deg) { g_source.set_angle_deg(deg); }
+void on_set_sim_running(bool running) { g_source.set_running(running); }
+
 std::size_t read_trace_locked(std::uint32_t since_seq, sp01::TraceEvent* out,
                               std::size_t cap, std::uint32_t* lost,
                               std::uint32_t* last_seq) {
@@ -479,6 +524,11 @@ extern "C" void app_main(void) {
     callbacks.request_target = &on_target_request;
     callbacks.set_time = &on_browser_time;
     callbacks.read_trace = &read_trace_locked;
+    callbacks.request_mode = &on_request_mode;
+    callbacks.set_manual_di = &on_set_manual_di;
+    callbacks.set_manual_weight = &on_set_manual_weight;
+    callbacks.set_manual_angle = &on_set_manual_angle;
+    callbacks.set_sim_running = &on_set_sim_running;
 
     const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
