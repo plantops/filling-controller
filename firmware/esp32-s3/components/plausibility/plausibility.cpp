@@ -15,6 +15,8 @@ const char* implausible_name(Implausible code) noexcept {
         case Implausible::IndexMissingWhileRunning: return "INDEX_MISSING_WHILE_RUNNING";
         case Implausible::PositionInputStuckHigh: return "POSITION_INPUT_STUCK_HIGH";
         case Implausible::PositionInputDead: return "POSITION_INPUT_DEAD";
+        case Implausible::FillPositionStuckHigh: return "FILL_POSITION_STUCK_HIGH";
+        case Implausible::WeightRisingWithFeederOff: return "WEIGHT_RISING_FEEDER_OFF";
         case Implausible::Count: break;
     }
     return "UNKNOWN";
@@ -33,6 +35,10 @@ const char* implausible_text_en(Implausible code) noexcept {
             return "A position input has stayed on for more than one revolution";
         case Implausible::PositionInputDead:
             return "A position input has not changed over several revolutions";
+        case Implausible::FillPositionStuckHigh:
+            return "Fill position input stuck on: it is a pulse, not a level";
+        case Implausible::WeightRisingWithFeederOff:
+            return "Weight is rising while the hopper feeder is stopped";
         case Implausible::Count: break;
     }
     return "";
@@ -51,6 +57,10 @@ const char* implausible_text_vi(Implausible code) noexcept {
             return "Một đầu vào vị trí dính ở mức ON quá một vòng quay";
         case Implausible::PositionInputDead:
             return "Một đầu vào vị trí không đổi trạng thái qua nhiều vòng quay";
+        case Implausible::FillPositionStuckHigh:
+            return "Đầu vào vị trí nạp dính mức ON: đây là xung, không phải mức";
+        case Implausible::WeightRisingWithFeederOff:
+            return "Cân đang tăng trong khi cấp liệu phễu đã dừng";
         case Implausible::Count: break;
     }
     return "";
@@ -83,11 +93,13 @@ void PlausibilityMonitor::raise(Implausible code, std::uint64_t now_us) noexcept
     }
 }
 
-void PlausibilityMonitor::update(std::uint64_t now_us,
-                                 const InputImage& inputs) noexcept {
+void PlausibilityMonitor::update(std::uint64_t now_us, const InputImage& inputs,
+                                 const WeightSnapshot& weight) noexcept {
     const bool index = input(inputs, Di::PositionIndex);
     const bool mark = input(inputs, Di::PositionMark);
     const bool motor = input(inputs, Di::MachineMotorRunning);
+    const bool fill_pos = input(inputs, Di::FillPosition);
+    const bool feeder = input(inputs, Di::HopperFeederRunning);
 
     if (!primed_) {
         primed_ = true;
@@ -99,6 +111,11 @@ void PlausibilityMonitor::update(std::uint64_t now_us,
         last_index_edge_us_ = now_us;
         last_mark_edge_us_ = now_us;
         motor_started_us_ = motor ? now_us : 0;
+        prev_fill_pos_ = fill_pos;
+        prev_feeder_ = feeder;
+        fill_pos_high_since_us_ = fill_pos ? now_us : 0;
+        feeder_off_ref_kg_ = weight.net_kg;
+        feeder_off_since_us_ = now_us;
         return;
     }
 
@@ -150,9 +167,33 @@ void PlausibilityMonitor::update(std::uint64_t now_us,
         raise(Implausible::PositionInputStuckHigh, now_us);
     }
 
+    // Rule 6: DI5 is a pulse.
+    if (fill_pos != prev_fill_pos_) fill_pos_high_since_us_ = fill_pos ? now_us : 0;
+    if (fill_pos && fill_pos_high_since_us_ != 0 &&
+        now_us - fill_pos_high_since_us_ > cfg_.max_revolution_us) {
+        raise(Implausible::FillPositionStuckHigh, now_us);
+    }
+
+    // Rule 7: nothing should be entering the bag with the feeder stopped.
+    if (feeder || weight.quality != WeightQuality::Good) {
+        feeder_off_ref_kg_ = weight.net_kg;
+        feeder_off_since_us_ = now_us;
+    } else {
+        if (weight.net_kg < feeder_off_ref_kg_) {
+            // A fall resets the reference: only a sustained rise matters.
+            feeder_off_ref_kg_ = weight.net_kg;
+            feeder_off_since_us_ = now_us;
+        } else if (weight.net_kg - feeder_off_ref_kg_ >= cfg_.feeder_off_rise_kg &&
+                   now_us - feeder_off_since_us_ >= cfg_.feeder_off_window_us) {
+            raise(Implausible::WeightRisingWithFeederOff, now_us);
+        }
+    }
+
     prev_index_ = index;
     prev_mark_ = mark;
     prev_motor_ = motor;
+    prev_fill_pos_ = fill_pos;
+    prev_feeder_ = feeder;
 }
 
 }  // namespace sp01
