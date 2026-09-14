@@ -12,6 +12,7 @@
 #include "sp01/controller_explain.hpp"
 #include "sp01/model.hpp"
 #include "sp01/time_shift.hpp"
+#include "sp01/test_source.hpp"
 #include "sp01/trace.hpp"
 
 namespace sp01 {
@@ -67,6 +68,14 @@ struct HmiCallbacks {
     std::size_t (*read_trace)(std::uint32_t since_seq, TraceEvent* out,
                               std::size_t cap, std::uint32_t* lost,
                               std::uint32_t* last_seq){nullptr};
+
+    // Commissioning source control. The supervisor PIN is checked here, in the
+    // firmware; the page never learns the correct value.
+    ModeChange (*request_mode)(RunMode next, bool pin_ok){nullptr};
+    void (*set_manual_di)(std::uint8_t channel, bool value){nullptr};
+    void (*set_manual_weight)(float kg){nullptr};
+    void (*set_manual_angle)(float deg){nullptr};
+    void (*set_sim_running)(bool running){nullptr};
 };
 
 esp_err_t hmi_start(const HmiIdentity& identity, const HmiPins& pins,
