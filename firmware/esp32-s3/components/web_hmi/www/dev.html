@@ -97,6 +97,23 @@ input[type=number],input[type=password]{border:1px solid var(--line);
 .ev{display:flex;gap:10px;font-size:12px;padding:3px 0;border-bottom:1px solid #f4f6f7}
 .ev .t{color:var(--ink3);min-width:74px}
 .ev b{min-width:62px}
+.modal{display:none;position:fixed;inset:0;background:#1c2024bf;z-index:9;
+  align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.pin{background:var(--panel);border-radius:14px;padding:22px;width:100%;
+  max-width:330px}
+.pin h3{margin:0 0 4px;font-size:17px}
+.pin p{margin:0 0 14px;font-size:13px;color:var(--ink3)}
+.dots{display:flex;gap:10px;justify-content:center;margin:4px 0 16px}
+.dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line)}
+.dot.f{background:var(--ink);border-color:var(--ink)}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.pad button{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  border-radius:10px;padding:17px 0;font:inherit;font-size:21px;font-weight:600;
+  cursor:pointer}
+.pad button:active{background:var(--bg)}
+.pinerr{color:var(--bad);font-size:13px;min-height:19px;margin-top:11px;
+  text-align:center;font-weight:600}
 footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
 @media(min-width:860px){
   .cnt{grid-template-columns:repeat(4,1fr)}
@@ -197,6 +214,27 @@ footer{color:var(--ink3);font-size:11px;text-align:center;padding:18px 0 8px}
   <footer id="foot">SP01 DEV</footer>
 </div>
 
+<div class="modal" id="modal">
+  <div class="pin">
+    <h3>PIN supervisor</h3>
+    <p id="pinSub">—</p>
+    <div class="dots"><div class="dot" id="p0"></div><div class="dot" id="p1"></div>
+      <div class="dot" id="p2"></div><div class="dot" id="p3"></div>
+      <div class="dot" id="p4"></div><div class="dot" id="p5"></div></div>
+    <div class="pad">
+      <button onclick="pk('1')">1</button><button onclick="pk('2')">2</button>
+      <button onclick="pk('3')">3</button><button onclick="pk('4')">4</button>
+      <button onclick="pk('5')">5</button><button onclick="pk('6')">6</button>
+      <button onclick="pk('7')">7</button><button onclick="pk('8')">8</button>
+      <button onclick="pk('9')">9</button>
+      <button onclick="closePin()">✕</button>
+      <button onclick="pk('0')">0</button>
+      <button onclick="pdel()">⌫</button>
+    </div>
+    <div class="pinerr" id="pinErr"></div>
+  </div>
+</div>
+
 <script>
 const DI=['feeder_running','downstream_ready','machine_motor_running','initiative',
           'fill_position','bag_present','position_index','position_mark'];
@@ -288,21 +326,48 @@ function drawEvents(){
 }
 
 /* ---------- mode ---------- */
-async function askMode(m){
+// A six-digit keypad in the page, not prompt(): mobile browsers and webviews
+// block prompt(), and a system dialog is unusable with gloves on.
+let pendingMode=null, pin='';
+function askMode(m){
   if (S && S.source===m) return;
-  const pin = prompt('PIN supervisor (6 số) để chuyển sang '+m);
-  if (!pin) return;
-  if (PREVIEW){ alert('preview: đổi sang '+m); return; }
-  const r = await fetch('/api/dev/mode',{method:'POST',
-    headers:{'Content-Type':'text/plain'}, body:'mode='+m+'&pin='+pin});
-  const t = await r.text();
-  if (!r.ok){
-    alert(t==='NOT_IDLE'
-      ? 'Không đổi được: controller phải ở WAIT_PERMISSIVE.'
-      : 'PIN không đúng.');
-  }
-  refresh();
+  pendingMode=m; pin=''; pdots();
+  document.getElementById('pinErr').textContent='';
+  document.getElementById('pinSub').textContent='Chuyển nguồn sang '+m;
+  document.getElementById('modal').classList.add('show');
 }
+function closePin(){
+  document.getElementById('modal').classList.remove('show');
+  pendingMode=null; pin=''; pdots();
+}
+function pdots(){
+  for (let i=0;i<6;i++)
+    document.getElementById('p'+i).classList.toggle('f', i<pin.length);
+}
+function pdel(){ pin=pin.slice(0,-1); pdots();
+  document.getElementById('pinErr').textContent=''; }
+function pk(k){
+  if (pin.length>=6) return;
+  pin+=k; pdots();
+  if (pin.length===6) submitMode();
+}
+async function submitMode(){
+  const m=pendingMode;
+  if (PREVIEW){ closePin(); alert('preview: đổi sang '+m); return; }
+  try{
+    const r = await fetch('/api/dev/mode',{method:'POST',
+      headers:{'Content-Type':'text/plain'}, body:'mode='+m+'&pin='+pin});
+    const t = (await r.text()).trim();
+    if (r.ok){ closePin(); refresh(); return; }
+    document.getElementById('pinErr').textContent = t==='NOT_IDLE'
+      ? 'Controller phải ở WAIT_PERMISSIVE'
+      : 'PIN không đúng';
+  }catch(e){
+    document.getElementById('pinErr').textContent='Mất kết nối';
+  }
+  pin=''; pdots();
+}
+
 async function inject(body){
   if (PREVIEW) return;
   await fetch('/api/dev/inject',{method:'POST',
