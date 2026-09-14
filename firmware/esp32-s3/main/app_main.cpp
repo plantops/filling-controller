@@ -61,6 +61,7 @@ std::uint64_t g_prev_tick_us = 0;
 // timeout. REAL_HW and SIMU use the monotonic clock as before.
 std::uint64_t g_sw_clock_us = 0;
 std::uint64_t g_sw_step_pending_us = 0;
+sp01::InputImage g_last_inputs{};
 
 float g_target_pending_kg = 0.0F;
 bool g_had_last_bag = false;
@@ -305,6 +306,9 @@ void control_task(void*) {
             }
 
             weight = src.weight;
+            portENTER_CRITICAL(&g_status_mux);
+            g_last_inputs = inputs;
+            portEXIT_CRITICAL(&g_status_mux);
             snapshot = g_controller->tick(ctl_now, inputs, weight, position);
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
@@ -472,6 +476,18 @@ void on_set_manual_weight(float kg) { g_source.set_weight_kg(kg); }
 void on_set_manual_angle(float deg) { g_source.set_angle_deg(deg); }
 void on_set_sim_running(bool running) { g_source.set_running(running); }
 
+bool on_clear_fault() {
+    const std::uint64_t now = static_cast<std::uint64_t>(esp_timer_get_time());
+    sp01::InputImage inputs{};
+    portENTER_CRITICAL(&g_status_mux);
+    inputs = g_last_inputs;
+    portEXIT_CRITICAL(&g_status_mux);
+    const bool ok = g_controller->clear_fault(
+        g_source.mode() == sp01::RunMode::FullSw ? g_sw_clock_us : now, inputs);
+    ESP_LOGW(kTag, "clear fault requested: %s", ok ? "cleared" : "refused");
+    return ok;
+}
+
 void on_step_ms(std::uint32_t ms) {
     portENTER_CRITICAL(&g_status_mux);
     g_sw_step_pending_us += static_cast<std::uint64_t>(ms) * 1000ULL;
@@ -564,6 +580,7 @@ extern "C" void app_main(void) {
     callbacks.set_manual_angle = &on_set_manual_angle;
     callbacks.set_sim_running = &on_set_sim_running;
     callbacks.step_ms = &on_step_ms;
+    callbacks.clear_fault = &on_clear_fault;
 
     const esp_err_t web_err = sp01::hmi_start(identity, pins, callbacks);
     if (web_err != ESP_OK) {
