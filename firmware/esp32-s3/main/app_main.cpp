@@ -351,6 +351,11 @@ void control_task(void*) {
             pub.inputs = inputs;
             pub.weight = weight;
             pub.commanded_outputs = commanded_outputs;
+            pub.source_mode = g_source.mode();
+            pub.output_authority = g_source.output_authority_possible();
+            pub.sim_running = g_source.running();
+            pub.manual_weight_kg = g_source.manual_weight_kg();
+            pub.manual_angle_deg = g_source.manual_angle_deg();
             pub.position = g_last_position;
 #if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
             pub.shadow_mode = true;
