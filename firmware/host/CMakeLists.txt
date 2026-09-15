@@ -12,6 +12,13 @@ target_include_directories(sp01_controller PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../esp32-s3/components/controller/include
 )
 
+add_library(sp01_cp_controller STATIC
+    ../esp32-s3/components/spout_cp/controller.cpp
+)
+target_include_directories(sp01_cp_controller PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/../esp32-s3/components/spout_cp/include
+)
+
 add_library(sp01_host_support INTERFACE)
 target_include_directories(sp01_host_support INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/include
@@ -20,6 +27,7 @@ target_include_directories(sp01_host_support INTERFACE
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sp01_controller PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(sp01_cp_controller PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(sp01_host_support INTERFACE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
@@ -38,3 +46,7 @@ add_test(NAME sp01_g3_gate_tests COMMAND sp01_g3_gate_tests)
 add_executable(sp01_reject_gate_tests tests/gate_reject_test.cpp)
 target_link_libraries(sp01_reject_gate_tests PRIVATE sp01_controller sp01_host_support)
 add_test(NAME sp01_reject_gate_tests COMMAND sp01_reject_gate_tests)
+
+add_executable(sp01_cp_tests tests/cp_controller_test.cpp)
+target_link_libraries(sp01_cp_tests PRIVATE sp01_cp_controller)
+add_test(NAME sp01_cp_tests COMMAND sp01_cp_tests)
