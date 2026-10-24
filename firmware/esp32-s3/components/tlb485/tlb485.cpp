@@ -247,6 +247,7 @@ bool Tlb485::kg_to_register_weight(float kg, std::uint32_t& raw) const noexcept 
 }
 
 esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
+    (void)now_us; // Legacy caller timestamp; measured sample time uses validated RX completion.
     const auto started_us = static_cast<std::uint64_t>(esp_timer_get_time());
     if (!bus_mutex_ || xSemaphoreTake(bus_mutex_, pdMS_TO_TICKS(150)) != pdTRUE) {
         const auto duration_us = static_cast<std::uint64_t>(esp_timer_get_time()) - started_us;
@@ -271,7 +272,8 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
     std::uint16_t regs[5]{};
     if (result == ESP_OK) result = read_holding(kRegStatus, 5, regs);
 
-    const auto duration_us = static_cast<std::uint64_t>(esp_timer_get_time()) - started_us;
+    const auto completed_us = static_cast<std::uint64_t>(esp_timer_get_time());
+    const auto duration_us = completed_us - started_us;
 
     if (result == ESP_OK) {
         const std::uint16_t status = regs[0];
@@ -280,7 +282,8 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
 
         WeightSnapshot next{};
         next.net_kg = kg;
-        next.sample_time_us = now_us;
+        // Timestamp validated Modbus data at receive completion, not poll start.
+        next.sample_time_us = completed_us;
         next.quality = ((status & kStatusFaultMask) != 0 || !std::isfinite(kg))
                            ? WeightQuality::Fault
                            : WeightQuality::Good;
@@ -296,8 +299,8 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
         if (duration_us > diagnostics_.poll_duration_max_us) {
             diagnostics_.poll_duration_max_us = duration_us;
         }
-        if (diagnostics_.last_success_us != 0 && now_us >= diagnostics_.last_success_us) {
-            const std::uint64_t interval_us = now_us - diagnostics_.last_success_us;
+        if (diagnostics_.last_success_us != 0 && completed_us >= diagnostics_.last_success_us) {
+            const std::uint64_t interval_us = completed_us - diagnostics_.last_success_us;
             diagnostics_.success_interval_last_us = interval_us;
             if (diagnostics_.success_interval_min_us == 0 ||
                 interval_us < diagnostics_.success_interval_min_us) {
@@ -307,7 +310,7 @@ esp_err_t Tlb485::poll_once(std::uint64_t now_us) noexcept {
                 diagnostics_.success_interval_max_us = interval_us;
             }
         }
-        diagnostics_.last_success_us = now_us;
+        diagnostics_.last_success_us = completed_us;
         portEXIT_CRITICAL(&mux_);
     } else {
         portENTER_CRITICAL(&mux_);
