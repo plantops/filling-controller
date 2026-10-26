@@ -107,11 +107,9 @@ func normalizeTelemetry(data map[string]any) map[string]any {
 			out["commanded_do"] = v
 		}
 	}
-	if _, ok := out["desired_do"]; !ok {
-		if v, exists := out["do"]; exists {
-			out["desired_do"] = v
-		}
-	}
+	// Legacy "do" reports the last commanded expander image only.
+	// Do not infer the controller's desired outputs from a board command.
+	// Missing desired_do must remain unavailable in commissioning evidence.
 	delete(out, "cycle")
 	delete(out, "broken_detected_us")
 	delete(out, "do")
