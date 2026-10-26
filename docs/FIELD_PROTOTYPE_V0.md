@@ -1,6 +1,13 @@
-# SP01 Field Prototype v0
+# SP01 Field Prototype v0 — SUPERSEDED / ARCHIVAL
 
 Date: 2026-09-12
+
+## Current safety status (2026-10-26)
+
+**DO NOT FLASH OR DEPLOY THE V0 ARTIFACT LISTED BELOW FOR NEW FIELD WORK.** The V0 image was superseded after physical DI polarity mismatch and subsequent DO polarity correction. The recorded correction commits are `9ba13966337720c2ba459bc057bdee524438797a` (DI) and `7f98c76bda2878e34b3ff8705e1cf69265b3de46` (DO). The corrected field configuration sets both `CONFIG_SP01_DI_INVERT_MASK=0xFF` and `CONFIG_SP01_DO_INVERT_MASK=0xFF`. See `evidence/SP01/2026-09-13/G8/DI_POLARITY_FIX.md` and `DO_POLARITY_FIX.md`.
+
+This document retains the original V0 procedure as historical evidence, **not a current flash instruction or G8/G9 authorization**. For another field visit, select an explicitly approved corrected image, verify its exact commit SHA and matching CI/artifact identity, and repeat local DI truth and isolated physical DO polarity/mapping/reset-safe checks. A CI PASS does not prove those physical checks. Keep all machine actuator outputs disconnected until formal G8 acceptance and locally authorized G8-to-G9 transition. Master status: issue #7 and draft PR #8.
+
 
 ## Frozen source and artifact
 
@@ -51,9 +58,9 @@ The controller still calculates desired process outputs internally, but when dum
 
 Broken-bag thresholds remain disabled/unfrozen until measured TLB/machine evidence exists.
 
-## Fast flash
+## Historical V0 flash procedure — NOT FOR NEW FIELD DEPLOYMENT
 
-Download and unzip `sp01-field-prototype`, then from PowerShell in the extracted directory:
+Historical command for reproducing the superseded V0 artifact only; **do not execute on an installed machine**. The original instruction was to unzip `sp01-field-prototype` and run:
 
 ```powershell
 .\flash.ps1
@@ -86,7 +93,7 @@ DO1..DO8   no machine actuator authority in this build
 
 Do not leave any prior G2 DO-to-DI bench loopback jumpers installed on the machine.
 
-## Minimum field acceptance
+## Historical prototype acceptance — NOT FORMAL G8
 
 Do not repeat exhaustive bench tests. For the first prototype visit, collect only enough evidence to decide whether the controller follows the real machine plausibly:
 
@@ -97,7 +104,7 @@ Do not repeat exhaustive bench tests. For the first prototype visit, collect onl
 5. `desired_do` may change with FSM state, while `commanded_do` remains physically suppressed in this shadow build.
 6. Record one serial capture or HMI screenshot and any mapping/timing exception.
 
-If these six checks are satisfactory, treat the field-shadow objective as achieved and move directly to integration of real weight/TLB and then locally authorized one-spout live authority. Do not spend time reopening waived G2 exhaustive channel tests unless field behavior is inconsistent.
+These checks can support only the prototype shadow/data-collection milestone. They do not establish formal G8 entry or PASS. Formal G8 requires documented G2, G2T, G3, G4, G5, G6, and G7 acceptance; G9 requires formal G8 acceptance and local authorization. Any unexpected output behavior reopens the relevant physical check.
 
 ## Deferred, not falsely passed
 
@@ -139,4 +146,4 @@ Master commissioning tracker: issue #7.
 Field execution ticket: issue #9.
 Long-running commissioning PR: #8.
 
-The commissioning PR remains draft until physical field evidence exists; the frozen prototype branch is the source-of-truth for this first site image.
+The commissioning PR remains draft until physical field evidence exists; the frozen V0 branch is historical only and must not be selected as the current field image.
