@@ -32,8 +32,11 @@ func TestNormalizeTelemetryLegacyAliases(t *testing.T) {
 	if got["schema_version"] != telemetrySchemaVersion {
 		t.Fatalf("schema version missing: %#v", got)
 	}
-	if got["cycle_id"] != float64(7) || got["commanded_do"] != float64(3) || got["desired_do"] != float64(3) || got["broken_bag_detected_us"] != float64(1234) {
+	if got["cycle_id"] != float64(7) || got["commanded_do"] != float64(3) || got["broken_bag_detected_us"] != float64(1234) {
 		t.Fatalf("legacy aliases not normalized: %#v", got)
+	}
+	if _, ok := got["desired_do"]; ok {
+		t.Fatalf("legacy commanded output was incorrectly promoted to desired output: %#v", got)
 	}
 	for _, legacy := range []string{"cycle", "do", "broken_detected_us"} {
 		if _, ok := got[legacy]; ok {
