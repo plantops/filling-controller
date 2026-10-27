@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -267,6 +268,14 @@ func (a *App) pollOne(ctx context.Context, src Source) {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 64<<10))
 	if err := dec.Decode(&data); err != nil {
 		a.store.Update(Snapshot{SpoutID: src.ID, ReceivedAt: now, Online: false, Error: "invalid JSON: " + err.Error()})
+		return
+	}
+	// A successful first decode does not establish that the HTTP body
+	// contains exactly one JSON value. Reject concatenated or trailing
+	// malformed content rather than accepting a potentially stale snapshot.
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		a.store.Update(Snapshot{SpoutID: src.ID, ReceivedAt: now, Online: false, Error: "invalid JSON: trailing data"})
 		return
 	}
 	// HTTP 200 with JSON null, {} or a missing state is not a valid
