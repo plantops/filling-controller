@@ -45,7 +45,7 @@ GET /api/v1/live                    text/event-stream
 
 The collector accepts the current ESP `api/state` shape as an opaque JSON object under `data`, so the firmware telemetry contract can evolve without moving process authority into the collector.
 
-Tracked event changes use canonical `mode`, `state`, `fault`, `disposition`, `cycle_id`, `di`, `desired_do`, `commanded_do`, and `broken_bag_detected_us` when available. For older embedded `/api/state` responses, legacy `do` is the controller's **desired** output image (`pack_outputs(s.controller.outputs)`), not the board's commanded output or physical feedback. The collector maps it only to `desired_do`; absent `commanded_do` and `physical_do` remain unavailable. This compatibility mapping is not electrical or physical gate evidence.
+Tracked event changes use canonical `mode`, `state`, `fault`, `disposition`, `cycle_id`, `di`, `desired_do`, `commanded_do`, `physical_do`, `broken_bag_detected_us`, `reject_window`, `position_source`, `dev_source`, and `authority` when available. Missing or null values are observation gaps, not transitions. The collector timestamps observations when polled; its event ring is **not** a synchronized high-resolution machine trace and cannot establish physical 210°/355° timing or G8 acceptance. For older embedded `/api/state` responses, legacy `do` is the controller's **desired** output image (`pack_outputs(s.controller.outputs)`), not the board's commanded output or physical feedback. The collector maps it only to `desired_do`; absent `commanded_do` and `physical_do` remain unavailable. This compatibility mapping is not electrical or physical gate evidence.
 
 ## Deployment boundary
 
