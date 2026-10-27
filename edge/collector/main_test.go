@@ -271,6 +271,52 @@ func TestPollOneRequiresSingleJSONValue(t *testing.T) {
 	}
 }
 
+// Collector event history must retain changes in position authority and reject
+// window when those fields are actually measured. Missing/null values are not
+// transitions. These events are poll-time observations, not G8 timing proof.
+func TestStoreTracksRejectWindowAndSourceChanges(t *testing.T) {
+	store := NewStore(30)
+	t0 := time.Unix(400, 0).UTC()
+	put := func(offset int, data map[string]any) {
+		store.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(time.Duration(offset) * time.Second),
+			Online: true, Data: data})
+	}
+	put(0, map[string]any{
+		"state": "REJECT_WAIT", "dev_source": "HW_TEST", "authority": "AUTO FSM",
+		"position_source": "UNAVAILABLE", "reject_window": nil, "physical_do": nil,
+	})
+	put(1, map[string]any{
+		"state": "REJECT_WAIT", "dev_source": "HW_TEST", "authority": "AUTO FSM",
+		"position_source": "REAL_REFERENCE", "reject_window": false, "physical_do": float64(0),
+	})
+	put(2, map[string]any{
+		"state": "REJECT_WAIT", "dev_source": "HW_TEST", "authority": "AUTO FSM",
+		"position_source": "REAL_REFERENCE", "reject_window": true, "physical_do": float64(1),
+	})
+	put(3, map[string]any{
+		"state": "REJECT_WAIT", "dev_source": "FULL_SW", "authority": "SIMULATION",
+		"position_source": "SIMULATED", "reject_window": false, "physical_do": nil,
+	})
+	want := map[string]int{
+		"discovered": 1, "position_source": 2, "reject_window": 2,
+		"physical_do": 1, "dev_source": 1, "authority": 1,
+	}
+	for _, event := range store.Events("SP01", 30) {
+		want[event.Kind]--
+		if want[event.Kind] < 0 {
+			t.Fatalf("unexpected extra event: %#v", event)
+		}
+		if event.Kind == "physical_do" && (event.From != float64(0) || event.To != float64(1)) {
+			t.Fatalf("physical_do transition must not be inferred from null: %#v", event)
+		}
+	}
+	for kind, remaining := range want {
+		if remaining != 0 {
+			t.Fatalf("event %s count mismatch: %d remaining", kind, remaining)
+		}
+	}
+}
+
 // Missing and null tracked fields in an otherwise online HTTP 200 snapshot
 // are gaps in field-level instrumentation, not process events to/from null.
 // A subsequent pair of populated observations must still record changes,
