@@ -126,11 +126,16 @@ func (s *Store) Update(next Snapshot) {
 		if prev.Online != next.Online {
 			s.appendEventLocked(Event{SpoutID: next.SpoutID, At: next.ReceivedAt, Kind: "online", From: prev.Online, To: next.Online})
 		}
-		for _, key := range trackedTelemetryKeys {
-			a := trackedValue(prev.Data, key)
-			b := trackedValue(next.Data, key)
-			if !equalJSONValue(a, b) {
-				s.appendEventLocked(Event{SpoutID: next.SpoutID, At: next.ReceivedAt, Kind: key, From: a, To: b})
+		// A disconnected collector has no process observations. Do not turn
+		// missing data into state transitions, or infer transitions on reconnect.
+		// The online event records the observation gap explicitly.
+		if prev.Online && next.Online {
+			for _, key := range trackedTelemetryKeys {
+				a := trackedValue(prev.Data, key)
+				b := trackedValue(next.Data, key)
+				if !equalJSONValue(a, b) {
+					s.appendEventLocked(Event{SpoutID: next.SpoutID, At: next.ReceivedAt, Kind: key, From: a, To: b})
+				}
 			}
 		}
 	} else {
