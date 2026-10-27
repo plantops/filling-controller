@@ -206,3 +206,46 @@ func TestPollOneRejectsHTTP200WithoutState(t *testing.T) {
 		})
 	}
 }
+
+// Missing and null tracked fields in an otherwise online HTTP 200 snapshot
+// are gaps in field-level instrumentation, not process events to/from null.
+// A subsequent pair of populated observations must still record changes,
+// including a valid numeric zero output image.
+func TestStorePartialTelemetryDoesNotInventProcessEvents(t *testing.T) {
+	s := NewStore(30)
+	t0 := time.Unix(300, 0).UTC()
+	update := func(offset int, data map[string]any) {
+		s.Update(Snapshot{
+			SpoutID: "SP01", ReceivedAt: t0.Add(time.Duration(offset) * time.Second),
+			Online: true, Data: data,
+		})
+	}
+	update(0, map[string]any{
+		"state": "COARSE_FILL", "disposition": "UNDECIDED",
+		"desired_do": float64(8), "commanded_do": float64(8),
+	})
+	update(1, map[string]any{"state": "COARSE_FILL", "disposition": nil})
+	if events := s.Events("SP01", 30); len(events) != 1 || events[0].Kind != "discovered" {
+		t.Fatalf("unavailable fields produced process events: %#v", events)
+	}
+	update(2, map[string]any{
+		"state": "FINE_FILL", "disposition": "GOOD",
+		"desired_do": float64(3), "commanded_do": float64(3),
+	})
+	events := s.Events("SP01", 30)
+	if len(events) != 2 || events[1].Kind != "state" ||
+		events[1].From != "COARSE_FILL" || events[1].To != "FINE_FILL" {
+		t.Fatalf("expected only observed state transition after field gap: %#v", events)
+	}
+	update(3, map[string]any{
+		"state": "FINE_FILL", "disposition": "GOOD",
+		"desired_do": float64(0), "commanded_do": float64(0),
+	})
+	events = s.Events("SP01", 30)
+	if len(events) != 4 || events[2].Kind != "desired_do" ||
+		events[3].Kind != "commanded_do" || events[2].To != float64(0) ||
+		events[3].To != float64(0) {
+		t.Fatalf("valid zero-valued output transitions were lost: %#v", events)
+	}
+}
+
