@@ -27,7 +27,12 @@ var trackedTelemetryKeys = []string{
 	"di",
 	"desired_do",
 	"commanded_do",
+	"physical_do",
 	"broken_bag_detected_us",
+	"reject_window",
+	"position_source",
+	"dev_source",
+	"authority",
 }
 
 type Source struct {
