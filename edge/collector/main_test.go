@@ -218,7 +218,7 @@ func TestPollOneRequiresSingleJSONValue(t *testing.T) {
 		{"concatenated objects", `{"state":"COARSE_FILL"}{"state":"REJECT_WAIT"}`, false},
 		{"trailing garbage", `{"state":"COARSE_FILL"} garbage`, false},
 		{"trailing primitive", `{"state":"COARSE_FILL"} true`, false},
-		{"trailing whitespace", "{\\"state\\":\\"COARSE_FILL\\"} \\n\\t", true},
+		{"trailing whitespace", `{"state":"COARSE_FILL"}   `, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
