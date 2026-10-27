@@ -270,6 +270,13 @@ func (a *App) pollOne(ctx context.Context, src Source) {
 		a.store.Update(Snapshot{SpoutID: src.ID, ReceivedAt: now, Online: false, Error: "invalid JSON: " + err.Error()})
 		return
 	}
+	// HTTP 200 with JSON null, {} or a missing state is not a valid
+	// controller observation. Treat it as an observation gap rather than
+	// emitting artificial state/output transitions from absent telemetry.
+	if state, ok := data["state"].(string); !ok || strings.TrimSpace(state) == "" {
+		a.store.Update(Snapshot{SpoutID: src.ID, ReceivedAt: now, Online: false, Error: "invalid telemetry: missing state"})
+		return
+	}
 	a.store.Update(Snapshot{SpoutID: src.ID, ReceivedAt: now, Online: true, Data: data})
 }
 
