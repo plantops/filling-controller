@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -151,5 +154,55 @@ func TestReadOnlyAPI(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("write route unexpectedly available: %d", w.Code)
+	}
+}
+
+func TestPollOneRejectsHTTP200WithoutState(t *testing.T) {
+	for _, invalid := range []string{
+		"null", "{}", `{"state":null}`, `{"state":""}`,
+		`{"state":"  "}`, `{"state":123}`,
+	} {
+		t.Run(invalid, func(t *testing.T) {
+			var body atomic.Value
+			body.Store(`{"state":"COARSE_FILL","disposition":"UNDECIDED"}`)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, body.Load().(string))
+			}))
+			defer server.Close()
+
+			store := NewStore(20)
+			app := &App{store: store, client: server.Client()}
+			src := Source{ID: "SP01", URL: server.URL}
+			app.pollOne(context.Background(), src)
+
+			body.Store(invalid)
+			app.pollOne(context.Background(), src)
+			snap, ok := store.Get("SP01")
+			if !ok || snap.Online || snap.Error != "invalid telemetry: missing state" {
+				t.Fatalf("invalid 200 body was accepted as process telemetry: %#v", snap)
+			}
+
+			body.Store(`{"state":"REJECT_WAIT","disposition":"REJECT"}`)
+			app.pollOne(context.Background(), src)
+			snap, ok = store.Get("SP01")
+			if !ok || !snap.Online || snap.Data["state"] != "REJECT_WAIT" {
+				t.Fatalf("valid telemetry did not recover: %#v", snap)
+			}
+
+			onlineChanges := 0
+			for _, ev := range store.Events("SP01", 20) {
+				switch ev.Kind {
+				case "discovered":
+				case "online":
+					onlineChanges++
+				default:
+					t.Fatalf("invented process event during invalid-telemetry gap: %#v", ev)
+				}
+			}
+			if onlineChanges != 2 {
+				t.Fatalf("expected offline/reconnect events, got %d", onlineChanges)
+			}
+		})
 	}
 }
