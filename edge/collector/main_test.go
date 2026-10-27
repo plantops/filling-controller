@@ -88,6 +88,49 @@ func TestStoreTracksControllerChanges(t *testing.T) {
 	}
 }
 
+// A missing observation must not be recorded as a controller transition.
+// State changes during an offline interval are unknown, not observed events.
+func TestStoreOfflineGapDoesNotInventProcessEvents(t *testing.T) {
+	s := NewStore(20)
+	t0 := time.Unix(200, 0).UTC()
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0, Online: true,
+		Data: map[string]any{"state": "COARSE_FILL", "disposition": "UNDECIDED"}})
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(time.Second), Online: false,
+		Error: "network timeout"})
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(2 * time.Second), Online: true,
+		Data: map[string]any{"state": "REJECT_WAIT", "disposition": "REJECT"}})
+
+	onlineChanges := 0
+	for _, ev := range s.Events("SP01", 20) {
+		switch ev.Kind {
+		case "discovered":
+		case "online":
+			onlineChanges++
+		default:
+			t.Fatalf("unobserved process transition across offline gap: %#v", ev)
+		}
+	}
+	if onlineChanges != 2 {
+		t.Fatalf("expected offline and reconnect events, got %d", onlineChanges)
+	}
+
+	// Continuous online observations must still emit genuine process changes.
+	s.Update(Snapshot{SpoutID: "SP01", ReceivedAt: t0.Add(3 * time.Second), Online: true,
+		Data: map[string]any{"state": "COMPLETE", "disposition": "REJECT"}})
+	stateChanges := 0
+	for _, ev := range s.Events("SP01", 20) {
+		if ev.Kind == "state" {
+			stateChanges++
+			if ev.From != "REJECT_WAIT" || ev.To != "COMPLETE" {
+				t.Fatalf("unexpected observed transition: %#v", ev)
+			}
+		}
+	}
+	if stateChanges != 1 {
+		t.Fatalf("expected one observed state transition, got %d", stateChanges)
+	}
+}
+
 func TestReadOnlyAPI(t *testing.T) {
 	store := NewStore(10)
 	store.Update(Snapshot{SpoutID: "SP01", ReceivedAt: time.Now().UTC(), Online: true, Data: map[string]any{"state": "WAIT_PERMISSIVE"}})
