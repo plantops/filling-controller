@@ -207,6 +207,70 @@ func TestPollOneRejectsHTTP200WithoutState(t *testing.T) {
 	}
 }
 
+// An HTTP 200 response containing more than one JSON value or trailing
+// garbage is not a valid single controller observation. Whitespace is valid.
+func TestPollOneRequiresSingleJSONValue(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		valid bool
+	}{
+		{"concatenated objects", `{"state":"COARSE_FILL"}{"state":"REJECT_WAIT"}`, false},
+		{"trailing garbage", `{"state":"COARSE_FILL"} garbage`, false},
+		{"trailing primitive", `{"state":"COARSE_FILL"} true`, false},
+		{"trailing whitespace", "{\\"state\\":\\"COARSE_FILL\\"} \\n\\t", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body atomic.Value
+			body.Store(`{"state":"WAIT_PERMISSIVE"}`)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, body.Load().(string))
+			}))
+			defer server.Close()
+			store := NewStore(20)
+			app := &App{store: store, client: server.Client()}
+			src := Source{ID: "SP01", URL: server.URL}
+			app.pollOne(context.Background(), src)
+			body.Store(tc.body)
+			app.pollOne(context.Background(), src)
+			snap, ok := store.Get("SP01")
+			if !ok || snap.Online != tc.valid {
+				t.Fatalf("unexpected validity: %#v", snap)
+			}
+			if tc.valid {
+				if snap.Data["state"] != "COARSE_FILL" {
+					t.Fatalf("valid trailing whitespace lost observation: %#v", snap)
+				}
+				return
+			}
+			if snap.Error != "invalid JSON: trailing data" {
+				t.Fatalf("unexpected trailing-data error: %#v", snap)
+			}
+			body.Store(`{"state":"REJECT_WAIT"}`)
+			app.pollOne(context.Background(), src)
+			snap, ok = store.Get("SP01")
+			if !ok || !snap.Online || snap.Data["state"] != "REJECT_WAIT" {
+				t.Fatalf("valid telemetry did not recover: %#v", snap)
+			}
+			onlineChanges := 0
+			for _, ev := range store.Events("SP01", 20) {
+				switch ev.Kind {
+				case "discovered":
+				case "online":
+					onlineChanges++
+				default:
+					t.Fatalf("invented process event across invalid JSON gap: %#v", ev)
+				}
+			}
+			if onlineChanges != 2 {
+				t.Fatalf("expected offline/reconnect events, got %d", onlineChanges)
+			}
+		})
+	}
+}
+
 // Missing and null tracked fields in an otherwise online HTTP 200 snapshot
 // are gaps in field-level instrumentation, not process events to/from null.
 // A subsequent pair of populated observations must still record changes,
