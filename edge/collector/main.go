@@ -67,13 +67,6 @@ func NewStore(maxEvents int) *Store {
 	}
 }
 
-func trackedValue(data map[string]any, key string) any {
-	if data == nil {
-		return nil
-	}
-	return data[key]
-}
-
 func equalJSONValue(a, b any) bool {
 	ab, _ := json.Marshal(a)
 	bb, _ := json.Marshal(b)
@@ -131,8 +124,14 @@ func (s *Store) Update(next Snapshot) {
 		// The online event records the observation gap explicitly.
 		if prev.Online && next.Online {
 			for _, key := range trackedTelemetryKeys {
-				a := trackedValue(prev.Data, key)
-				b := trackedValue(next.Data, key)
+				a, prevPresent := prev.Data[key]
+				b, nextPresent := next.Data[key]
+				// Missing or null fields are unavailable observations, not
+				// measured transitions to/from null. Require two consecutive
+				// populated observations for each individual tracked key.
+				if !prevPresent || !nextPresent || a == nil || b == nil {
+					continue
+				}
 				if !equalJSONValue(a, b) {
 					s.appendEventLocked(Event{SpoutID: next.SpoutID, At: next.ReceivedAt, Kind: key, From: a, To: b})
 				}
