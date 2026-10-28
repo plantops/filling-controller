@@ -1,6 +1,7 @@
 name: edge-web
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, diag/sp01-g2-g9]
     paths:
