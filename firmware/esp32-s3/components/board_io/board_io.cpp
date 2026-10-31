@@ -103,4 +103,14 @@ esp_err_t BoardIo::force_safe() noexcept {
     return write_physical_byte(do_invert_mask_, true);
 }
 
+OutputImage BoardIo::last_commanded_outputs() const noexcept {
+    OutputImage image{};
+    for (std::size_t i = 0; i < image.channels.size(); ++i) {
+        const bool physical_level = (last_physical_byte_ & (1U << i)) != 0;
+        const bool invert = (do_invert_mask_ & (1U << i)) != 0;
+        image.channels[i] = physical_level ^ invert;
+    }
+    return image;
+}
+
 }  // namespace sp01

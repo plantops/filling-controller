@@ -185,6 +185,12 @@ G9 LIVE
 
 Numeric pass/fail limits are frozen from measurements before a gate is signed off; do not invent them in advance.
 
+## Engineering views
+
+The canonical cross-discipline visualization model is [`SP01_ENGINEERING_VIEWS.md`](SP01_ENGINEERING_VIEWS.md). It defines the runtime timeline, state matrix, interlock flow/equations, logic dependency graph, executable-ground-truth hierarchy, physical I/O view, fault matrix, supervisory projection, protocol/data map and digital-twin HMI.
+
+The views are derived from executable C++ and measured evidence. Historical Python/raw-loadcell diagrams or nominal timing/angle values are not production truth.
+
 ## HMI v0.1
 
 ```text
@@ -196,6 +202,8 @@ Calibration  zero / 20 kg check / 50 kg span / verify
 Diagnostics  TLB, RS485 age/errors, Wi-Fi, reset reason, firmware
 Service      version/config identity and future export/import support
 ```
+
+View 11 in [`SP01_ENGINEERING_VIEWS.md`](SP01_ENGINEERING_VIEWS.md) is the UI composition contract. The HMI should combine process schematic, weight/timeline, state transitions, interlocks, I/O and diagnostics without displaying pseudo-live metrics that firmware does not actually provide.
 
 The Linux preview may show recipe/settings UX before write authority is implemented on ESP. Runtime writes must use validated service/config APIs; browser code never writes raw GPIO or raw Modbus registers.
 

@@ -44,8 +44,8 @@ The safest way to identify a terminal is always by its printed label, not by mem
 | DI6 | `bag.present` | bag presence/pressure switch |
 | DI7 | `position.discharge_ref_a` | discharge reference A |
 | DI8 | `position.discharge_ref_b` | discharge reference B |
-| GND | input field ground/reference terminal | do not confuse with board DC- unless the chosen input topology calls for it |
-| COM | digital-input common (`DICOM`) | used according to dry/wet-contact topology |
+| GND | input digital ground/reference (`DGND`) | passive dry-contact reference for first G2 test |
+| COM | digital-input common (`DICOM`) | leave floating for passive dry-contact test; used for active NPN/PNP topology later |
 
 Firmware GPIO mapping behind the isolated input stage is currently DI1..DI8 = GPIO4..GPIO11. **Technicians never wire directly to these GPIO pins.**
 
@@ -88,13 +88,13 @@ For first onboarding, USB-only power/flash comes before the 24 V terminal test.
 
 ## 4. First DI bench wiring — passive/dry contact
 
-The physical board has the same `COM / GND / DI1..DI8` naming used by Waveshare's isolated 8DI family. Waveshare's published dry-contact scheme leaves the input COM electrically floating from the external supply and closes a dry contact between `COM` and the selected `DIx`.
+Waveshare's passive-input convention leaves `DICOM` unconnected. Therefore the first G2 dry-contact test uses the input `DGND` terminal as the passive contact reference and the selected `DIx` terminal as the signal input.
 
 For the first G2 input test:
 
 ```text
-INPUT COM ---- simple switch ---- DI1
-INPUT GND ---- not used for this dry-contact test
+INPUT DGND ---- simple switch/jumper ---- DI1
+INPUT COM  ---- leave floating
 ```
 
 Then move the DI side of the same switch to DI2 ... DI8 one channel at a time.
@@ -102,9 +102,25 @@ Then move the DI side of the same switch to DI2 ... DI8 one channel at a time.
 Expected behavior:
 
 ```text
-switch OPEN   -> DIx OFF
-switch CLOSED -> DIx ON
+switch OPEN   -> raw DI bit high / logical input OFF
+switch CLOSED -> raw DI bit low  / logical input ON
 ```
+
+Expected raw bytes with only one channel closed:
+
+```text
+all open  0xFF
+DI1       0xFE
+DI2       0xFD
+DI3       0xFB
+DI4       0xF7
+DI5       0xEF
+DI6       0xDF
+DI7       0xBF
+DI8       0x7F
+```
+
+Do not connect `INPUT COM -> DIx` for this passive test. `DICOM` is used when configuring active NPN/PNP wet-contact wiring.
 
 If software polarity appears inverted, verify the physical wiring before changing `DI_INVERT_MASK`.
 
@@ -249,8 +265,9 @@ physical board model photo        RECEIVED
 cover terminal-label photo        RECEIVED
 open-board PCB photo              RECEIVED
 literal terminal map              FROZEN IN THIS FILE
-G1 safe physical boot             PENDING
-G2 physical DI/DO validation      PENDING
+G1 safe physical boot             PASS
+G2 1 h soak                       PASS
+G2 physical DI/DO validation      ACTIVE
 TLB485                             NOT YET IN HAND
 ```
 

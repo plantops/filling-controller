@@ -4,34 +4,51 @@
 #include "sp01/web_hmi.hpp"
 
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
 #include <cinttypes>
+#include <cstdio>
 
 namespace {
 
 constexpr char kTag[] = "sp01";
+constexpr char kFieldApSsid[] = "SP01-HMI";
+constexpr char kFieldApPassword[] = "sp01filling";
 
 sp01::Controller* g_controller = nullptr;
 sp01::BoardIo* g_io = nullptr;
 sp01::Tlb485* g_tlb = nullptr;
 portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 sp01::InputImage g_inputs{};
+sp01::WeightSnapshot g_weight_snapshot{};
 sp01::ControllerSnapshot g_controller_snapshot{};
+sp01::OutputImage g_commanded_outputs{};
 sp01::ControllerConfig g_controller_config{};
 std::uint8_t g_bench_do_channel = 0;
 std::uint64_t g_bench_do_until_us = 0;
+
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+float g_dummy_weight_kg = 0.0F;
+std::uint32_t g_dummy_weight_sequence = 0;
+#endif
 
 sp01::ControllerConfig make_controller_config() noexcept {
     sp01::ControllerConfig c{};
     c.target_kg = static_cast<float>(CONFIG_SP01_TARGET_G) / 1000.0F;
     c.coarse_to_fine_kg = static_cast<float>(CONFIG_SP01_COARSE_TO_FINE_G) / 1000.0F;
     c.cutoff_margin_kg = static_cast<float>(CONFIG_SP01_CUTOFF_MARGIN_G) / 1000.0F;
+    c.broken_bag_loss_trip_kg = static_cast<float>(CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G) / 1000.0F;
+    c.broken_bag_persist_us = static_cast<std::uint64_t>(CONFIG_SP01_BROKEN_BAG_PERSIST_MS) * 1000ULL;
+    c.reject_wait_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS) * 1000ULL;
     c.weight_stale_us = static_cast<std::uint64_t>(CONFIG_SP01_WEIGHT_STALE_MS) * 1000ULL;
     c.bag_acquire_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_BAG_ACQUIRE_TIMEOUT_MS) * 1000ULL;
     c.coarse_timeout_us = static_cast<std::uint64_t>(CONFIG_SP01_COARSE_TIMEOUT_MS) * 1000ULL;
@@ -44,6 +61,121 @@ sp01::ControllerConfig make_controller_config() noexcept {
     return c;
 }
 
+bool valid_broken_bag_config(const sp01::ControllerConfig& c) noexcept {
+    const bool has_loss = c.broken_bag_loss_trip_kg > 0.0F;
+    const bool has_persist = c.broken_bag_persist_us > 0;
+    const bool has_timeout = c.reject_wait_timeout_us > 0;
+    const bool any = has_loss || has_persist || has_timeout;
+    const bool all = has_loss && has_persist && has_timeout;
+    return !any || all;
+}
+
+void log_build_and_config_identity() noexcept {
+    const esp_app_desc_t* app = esp_app_get_description();
+    if (app) {
+        ESP_LOGI(kTag,
+                 "build project=%s version=%s idf=%s elf_sha256=%02x%02x%02x%02x%02x%02x%02x%02x reset_reason=%d",
+                 app->project_name, app->version, app->idf_ver,
+                 static_cast<unsigned>(app->app_elf_sha256[0]),
+                 static_cast<unsigned>(app->app_elf_sha256[1]),
+                 static_cast<unsigned>(app->app_elf_sha256[2]),
+                 static_cast<unsigned>(app->app_elf_sha256[3]),
+                 static_cast<unsigned>(app->app_elf_sha256[4]),
+                 static_cast<unsigned>(app->app_elf_sha256[5]),
+                 static_cast<unsigned>(app->app_elf_sha256[6]),
+                 static_cast<unsigned>(app->app_elf_sha256[7]),
+                 static_cast<int>(esp_reset_reason()));
+    }
+    ESP_LOGI(kTag,
+             "config control_ms=%d target_g=%d coarse_to_fine_g=%d cutoff_margin_g=%d weight_stale_ms=%d "
+             "broken_loss_g=%d broken_persist_ms=%d reject_timeout_ms=%d discharge_counts=%d discharge_lead=%d "
+             "di_invert=0x%02x do_invert=0x%02x tlb_enable=%d dummy_weight=%d tlb_baud=%d tlb_slave=%d tlb_poll_ms=%d",
+             CONFIG_SP01_CONTROL_PERIOD_MS, CONFIG_SP01_TARGET_G, CONFIG_SP01_COARSE_TO_FINE_G,
+             CONFIG_SP01_CUTOFF_MARGIN_G, CONFIG_SP01_WEIGHT_STALE_MS,
+             CONFIG_SP01_BROKEN_BAG_LOSS_TRIP_G, CONFIG_SP01_BROKEN_BAG_PERSIST_MS,
+             CONFIG_SP01_REJECT_WAIT_TIMEOUT_MS, CONFIG_SP01_DISCHARGE_COUNTDOWN_COUNTS,
+             CONFIG_SP01_DISCHARGE_LEAD_COUNTS, CONFIG_SP01_DI_INVERT_MASK, CONFIG_SP01_DO_INVERT_MASK,
+#if CONFIG_SP01_TLB_ENABLE
+             1,
+#else
+             0,
+#endif
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+             1,
+#else
+             0,
+#endif
+             CONFIG_SP01_TLB_BAUD, CONFIG_SP01_TLB_SLAVE, CONFIG_SP01_TLB_POLL_MS);
+}
+
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+sp01::WeightSnapshot dummy_weight(std::uint64_t now_us, sp01::State state) noexcept {
+    constexpr float kCoarseStepKg = 0.20F;
+    constexpr float kFineStepKg = 0.05F;
+
+    bool stable = true;
+    switch (state) {
+        case sp01::State::WaitPermissive:
+        case sp01::State::WaitFillPosition:
+        case sp01::State::BagAcquire:
+        case sp01::State::BagVerify:
+        case sp01::State::TareReady:
+            g_dummy_weight_kg = 0.0F;
+            break;
+
+        case sp01::State::CoarseFill:
+            stable = false;
+            g_dummy_weight_kg += kCoarseStepKg;
+            if (g_dummy_weight_kg > g_controller_config.coarse_to_fine_kg) {
+                g_dummy_weight_kg = g_controller_config.coarse_to_fine_kg;
+            }
+            break;
+
+        case sp01::State::FineFill:
+            stable = false;
+            g_dummy_weight_kg += kFineStepKg;
+            if (g_dummy_weight_kg > g_controller_config.target_kg) {
+                g_dummy_weight_kg = g_controller_config.target_kg;
+            }
+            break;
+
+        case sp01::State::Cutoff:
+            stable = false;
+            if (g_dummy_weight_kg < g_controller_config.target_kg) {
+                g_dummy_weight_kg = g_controller_config.target_kg;
+            }
+            break;
+
+        case sp01::State::Settle:
+        case sp01::State::RejectWait:
+        case sp01::State::WaitDischarge:
+        case sp01::State::Push:
+        case sp01::State::Complete:
+        case sp01::State::Fault:
+            break;
+    }
+
+    sp01::WeightSnapshot w{};
+    w.net_kg = g_dummy_weight_kg;
+    w.sample_time_us = now_us;
+    w.sequence = ++g_dummy_weight_sequence;
+    w.quality = sp01::WeightQuality::Good;
+    w.stable = stable;
+    return w;
+}
+#endif
+
+sp01::WeightSnapshot current_weight(std::uint64_t now_us) noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    return dummy_weight(now_us, g_controller->snapshot().state);
+#elif CONFIG_SP01_TLB_ENABLE
+    return g_tlb->snapshot();
+#else
+    (void)now_us;
+    return {};
+#endif
+}
+
 bool weight_fresh_now(const sp01::WeightSnapshot& weight) noexcept {
     if (weight.quality != sp01::WeightQuality::Good) return false;
     const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
@@ -54,16 +186,22 @@ bool fill_hmi_snapshot(sp01::HmiSnapshot& out) noexcept {
     if (!g_controller || !g_tlb) return false;
     portENTER_CRITICAL(&g_status_mux);
     out.inputs = g_inputs;
+    out.weight = g_weight_snapshot;
     out.controller = g_controller_snapshot;
+    out.commanded_outputs = g_commanded_outputs;
     portEXIT_CRITICAL(&g_status_mux);
-    out.weight = g_tlb->snapshot();
+#if CONFIG_SP01_TLB_ENABLE
     out.tlb = g_tlb->diagnostics();
+#else
+    out.tlb = {};
+#endif
 
     const bool machine_stopped = !sp01::input(out.inputs, sp01::Di::MachineMotorRunning);
     const bool fill_switch_off = !sp01::input(out.inputs, sp01::Di::ProcessInitiative);
     out.service_ready = machine_stopped && fill_switch_off &&
                         out.controller.state == sp01::State::WaitPermissive &&
                         sp01::all_outputs_off(out.controller.outputs) &&
+                        sp01::all_outputs_off(out.commanded_outputs) &&
                         out.weight.stable && weight_fresh_now(out.weight);
     return true;
 }
@@ -74,13 +212,22 @@ bool service_ready() noexcept {
 }
 
 esp_err_t hmi_cal_zero() noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
     return g_tlb->calibration_zero();
+#endif
 }
 
 esp_err_t hmi_cal_span(float kg) noexcept {
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    (void)kg;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (!g_tlb || !service_ready()) return ESP_ERR_NOT_ALLOWED;
     return g_tlb->calibration_span(kg);
+#endif
 }
 
 esp_err_t hmi_bench_do_pulse(std::uint8_t channel, std::uint32_t pulse_ms) noexcept {
@@ -134,25 +281,29 @@ void control_task(void*) {
         sp01::InputImage inputs{};
         esp_err_t io_err = g_io->read_inputs(inputs);
         sp01::ControllerSnapshot snapshot{};
+        sp01::OutputImage commanded_outputs{};
+        sp01::WeightSnapshot weight{};
 
         if (io_err != ESP_OK) {
             g_controller->force_fault(sp01::Fault::IoFault, now);
             snapshot = g_controller->snapshot();
             (void)g_io->force_safe();
+            commanded_outputs = g_io->last_commanded_outputs();
         } else {
             inputs.mode = sp01::input(inputs, sp01::Di::MachineMotorRunning)
                               ? sp01::OperationMode::Auto
                               : sp01::OperationMode::Manual;
 
-            const auto weight = g_tlb->snapshot();
+            weight = current_weight(now);
             snapshot = g_controller->tick(now, inputs, weight);
 
             sp01::OutputImage physical_outputs = snapshot.outputs;
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-            // G2 bench artifact is deliberately non-operational: normal process
-            // outputs are suppressed. Only one explicit HMI-requested DO may pulse,
-            // and it automatically returns to all-off after <= 1 second.
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE || CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Prototype/shadow modes never apply normal process outputs to the board.
             physical_outputs = sp01::safe_output_image();
+#endif
+#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
+            // Optional disconnected-bench one-hot pulse path.
             std::uint8_t bench_channel = 0;
             std::uint64_t bench_until = 0;
             portENTER_CRITICAL(&g_status_mux);
@@ -167,7 +318,6 @@ void control_task(void*) {
             if (bench_channel >= 1 && bench_channel <= 8) {
                 physical_outputs.channels[bench_channel - 1] = true;
             }
-            snapshot.outputs = physical_outputs;
 #endif
 
             io_err = g_io->commit_outputs(physical_outputs);
@@ -175,15 +325,15 @@ void control_task(void*) {
                 (void)g_io->force_safe();
                 g_controller->force_fault(sp01::Fault::IoFault, now);
                 snapshot = g_controller->snapshot();
-#if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-                snapshot.outputs = sp01::safe_output_image();
-#endif
             }
+            commanded_outputs = g_io->last_commanded_outputs();
         }
 
         portENTER_CRITICAL(&g_status_mux);
         g_inputs = inputs;
+        g_weight_snapshot = weight;
         g_controller_snapshot = snapshot;
+        g_commanded_outputs = commanded_outputs;
         portEXIT_CRITICAL(&g_status_mux);
 
         if (snapshot.state != previous_state) {
@@ -198,12 +348,60 @@ void control_task(void*) {
     }
 }
 
+void start_field_hotspot_if_needed() noexcept {
+    if (CONFIG_SP01_WIFI_SSID[0] != '\0') {
+        ESP_LOGI(kTag, "Field hotspot skipped: configured Wi-Fi STA is enabled");
+        return;
+    }
+
+    esp_netif_t* ap_netif = esp_netif_create_default_wifi_ap();
+    if (!ap_netif) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: AP netif create failed");
+        return;
+    }
+    (void)esp_netif_set_hostname(ap_netif, "sp01-ap");
+
+    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t err = esp_wifi_init(&init);
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: Wi-Fi init failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    wifi_config_t ap{};
+    std::snprintf(reinterpret_cast<char*>(ap.ap.ssid), sizeof(ap.ap.ssid), "%s", kFieldApSsid);
+    std::snprintf(reinterpret_cast<char*>(ap.ap.password), sizeof(ap.ap.password), "%s", kFieldApPassword);
+    ap.ap.channel = 1;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+
+    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_AP, &ap);
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "Field hotspot unavailable: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_netif_ip_info_t ip{};
+    if (esp_netif_get_ip_info(ap_netif, &ip) == ESP_OK) {
+        ESP_LOGI(kTag, "FIELD HOTSPOT READY: SSID=%s HMI=http://" IPSTR, kFieldApSsid, IP2STR(&ip.ip));
+    } else {
+        ESP_LOGI(kTag, "FIELD HOTSPOT READY: SSID=%s HMI=http://192.168.4.1", kFieldApSsid);
+    }
+}
+
 }  // namespace
 
 extern "C" void app_main(void) {
     static sp01::BoardIo io;
     static sp01::Tlb485 tlb;
     g_controller_config = make_controller_config();
+    if (!valid_broken_bag_config(g_controller_config)) {
+        ESP_LOGE(kTag,
+                 "invalid broken-bag config: loss trip, persistence and reject timeout must be all zero or all non-zero");
+        ESP_ERROR_CHECK(ESP_ERR_INVALID_ARG);
+    }
     static sp01::Controller controller(g_controller_config);
 
     g_io = &io;
@@ -211,8 +409,15 @@ extern "C" void app_main(void) {
     g_controller = &controller;
 
     ESP_LOGI(kTag, "SP01 v0.1 ESP-IDF/C++ controller");
+    log_build_and_config_identity();
+    if (g_controller_config.broken_bag_loss_trip_kg <= 0.0F) {
+        ESP_LOGW(kTag, "broken-bag detector disabled pending G4/G8 measured commissioning values");
+    }
+#if CONFIG_SP01_DUMMY_WEIGHT_ENABLE
+    ESP_LOGW(kTag, "FIELD PROTOTYPE SHADOW: dummy weight active; normal process DO suppressed");
+#endif
 #if CONFIG_SP01_BENCH_DO_TEST_ENABLE
-    ESP_LOGW(kTag, "G2 BENCH BUILD: normal process outputs suppressed; HMI one-hot DO pulse only");
+    ESP_LOGW(kTag, "G2 BENCH MODE: normal process outputs suppressed; HMI one-hot DO pulse only");
 #endif
     ESP_ERROR_CHECK(io.init(static_cast<std::uint8_t>(CONFIG_SP01_DI_INVERT_MASK),
                             static_cast<std::uint8_t>(CONFIG_SP01_DO_INVERT_MASK)));
@@ -231,7 +436,9 @@ extern "C" void app_main(void) {
 #endif
 
     portENTER_CRITICAL(&g_status_mux);
+    g_weight_snapshot = current_weight(static_cast<std::uint64_t>(esp_timer_get_time()));
     g_controller_snapshot = controller.snapshot();
+    g_commanded_outputs = io.last_commanded_outputs();
     portEXIT_CRITICAL(&g_status_mux);
 
     xTaskCreatePinnedToCore(control_task, "sp01_control", 4096, nullptr, 15, nullptr, 1);
@@ -239,9 +446,6 @@ extern "C" void app_main(void) {
     xTaskCreatePinnedToCore(weighing_task, "sp01_tlb", 4096, nullptr, 10, nullptr, 0);
 #endif
 
-    // ESP-IDF's W5500 interrupt mode requires the GPIO ISR service to exist
-    // before the Ethernet driver registers the IRQ handler. The previous G2
-    // build omitted this, so W5500 could fail before DHCP ever started.
     const esp_err_t gpio_isr_err = gpio_install_isr_service(0);
     if (gpio_isr_err != ESP_OK && gpio_isr_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(kTag, "GPIO ISR service init failed: %s", esp_err_to_name(gpio_isr_err));
@@ -258,5 +462,9 @@ extern "C" void app_main(void) {
 #endif
     const esp_err_t web_err = sp01::web_hmi_start(web, fill_hmi_snapshot, hmi_cal_zero, hmi_cal_span,
                                                   hmi_bench_do_pulse, hmi_bench_do_off);
-    if (web_err != ESP_OK) ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
+    if (web_err != ESP_OK) {
+        ESP_LOGW(kTag, "HMI disabled: %s", esp_err_to_name(web_err));
+    } else {
+        start_field_hotspot_if_needed();
+    }
 }

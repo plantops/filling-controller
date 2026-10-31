@@ -32,6 +32,7 @@ const char* state_name(State state) noexcept {
         case State::FineFill: return "FINE_FILL";
         case State::Cutoff: return "CUTOFF";
         case State::Settle: return "SETTLE";
+        case State::RejectWait: return "REJECT_WAIT";
         case State::WaitDischarge: return "WAIT_DISCHARGE";
         case State::Push: return "PUSH";
         case State::Complete: return "COMPLETE";
@@ -56,6 +57,15 @@ const char* fault_name(Fault fault) noexcept {
     return "UNKNOWN";
 }
 
+const char* disposition_name(BagDisposition disposition) noexcept {
+    switch (disposition) {
+        case BagDisposition::Undecided: return "UNDECIDED";
+        case BagDisposition::Good: return "GOOD";
+        case BagDisposition::Reject: return "REJECT";
+    }
+    return "UNKNOWN";
+}
+
 Controller::Controller(ControllerConfig config) noexcept : config_(config) {
     reset();
 }
@@ -65,6 +75,7 @@ void Controller::reset(std::uint64_t now_us) noexcept {
     snapshot_.state = State::WaitPermissive;
     snapshot_.fault = Fault::None;
     snapshot_.mode = OperationMode::Auto;
+    snapshot_.disposition = BagDisposition::Undecided;
     snapshot_.state_enter_us = now_us;
     snapshot_.outputs = safe_output_image();
     fill_position_armed_ = false;
@@ -72,6 +83,7 @@ void Controller::reset(std::uint64_t now_us) noexcept {
     prev_discharge_ref_a_ = false;
     prev_discharge_ref_b_ = false;
     discharge_ref_a_us_ = 0;
+    reset_broken_bag_tracking();
 }
 
 void Controller::force_fault(Fault code, std::uint64_t now_us) noexcept {
@@ -91,6 +103,13 @@ void Controller::transition(State next, std::uint64_t now_us) noexcept {
     if (snapshot_.state == next) return;
     snapshot_.state = next;
     snapshot_.state_enter_us = now_us;
+    if (next == State::BagAcquire) {
+        snapshot_.disposition = BagDisposition::Undecided;
+        snapshot_.broken_bag_detected_us = 0;
+        snapshot_.broken_bag_peak_kg = 0.0F;
+        snapshot_.broken_bag_weight_kg = 0.0F;
+        reset_broken_bag_tracking();
+    }
     if (next == State::Complete) ++snapshot_.cycle_id;
 }
 
@@ -133,8 +152,64 @@ bool Controller::auto_cycle_state() const noexcept {
            snapshot_.state == State::FineFill ||
            snapshot_.state == State::Cutoff ||
            snapshot_.state == State::Settle ||
+           snapshot_.state == State::RejectWait ||
            snapshot_.state == State::WaitDischarge ||
            snapshot_.state == State::Push;
+}
+
+void Controller::reset_broken_bag_tracking() noexcept {
+    broken_bag_tracking_ = false;
+    broken_bag_peak_kg_ = 0.0F;
+    broken_bag_below_since_us_ = 0;
+    broken_bag_last_sequence_ = 0;
+}
+
+bool Controller::broken_bag_detected(std::uint64_t now_us,
+                                     const WeightSnapshot& weight) noexcept {
+    if (config_.broken_bag_loss_trip_kg <= 0.0F ||
+        config_.broken_bag_persist_us == 0 ||
+        !weight_fresh(now_us, weight)) {
+        return false;
+    }
+
+    if (!broken_bag_tracking_) {
+        broken_bag_tracking_ = true;
+        broken_bag_peak_kg_ = weight.net_kg;
+        broken_bag_last_sequence_ = weight.sequence;
+        return false;
+    }
+
+    // Count persistence only from new TLB samples. Repeated controller ticks
+    // over one fresh sample must not manufacture broken-bag evidence.
+    if (weight.sequence == broken_bag_last_sequence_) return false;
+    broken_bag_last_sequence_ = weight.sequence;
+
+    if (weight.net_kg > broken_bag_peak_kg_) {
+        broken_bag_peak_kg_ = weight.net_kg;
+        broken_bag_below_since_us_ = 0;
+        return false;
+    }
+
+    const float loss_kg = broken_bag_peak_kg_ - weight.net_kg;
+    if (loss_kg < config_.broken_bag_loss_trip_kg) {
+        broken_bag_below_since_us_ = 0;
+        return false;
+    }
+
+    if (broken_bag_below_since_us_ == 0) {
+        broken_bag_below_since_us_ = now_us;
+        return false;
+    }
+
+    if (now_us - broken_bag_below_since_us_ < config_.broken_bag_persist_us) {
+        return false;
+    }
+
+    snapshot_.disposition = BagDisposition::Reject;
+    snapshot_.broken_bag_detected_us = now_us;
+    snapshot_.broken_bag_peak_kg = broken_bag_peak_kg_;
+    snapshot_.broken_bag_weight_kg = weight.net_kg;
+    return true;
 }
 
 void Controller::reset_discharge_capture(const InputImage& inputs) noexcept {
@@ -213,6 +288,7 @@ OutputImage Controller::outputs_for_state() const noexcept {
 
         case State::Cutoff:
         case State::Settle:
+        case State::RejectWait:
         case State::WaitDischarge:
             set_output(out, Do::ScannerDown, true);
             set_output(out, Do::BagDetectAir, true);
@@ -235,7 +311,8 @@ OutputImage Controller::outputs_for_state() const noexcept {
 
 ControllerSnapshot Controller::tick(std::uint64_t now_us,
                                     const InputImage& inputs,
-                                    const WeightSnapshot& weight) noexcept {
+                                    const WeightSnapshot& weight,
+                                    const PositionSnapshot& position) noexcept {
     if (snapshot_.state == State::Fault) {
         snapshot_.outputs = safe_output_image();
         return snapshot_;
@@ -325,6 +402,7 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                 } else if (!weight_fresh(now_us, weight)) {
                     fault(Fault::WeightStale, now_us);
                 } else {
+                    reset_broken_bag_tracking();
                     transition(State::CoarseFill, now_us);
                 }
                 break;
@@ -334,6 +412,12 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::WeightFault, now_us);
                 } else if (!weight_fresh(now_us, weight)) {
                     fault(Fault::WeightStale, now_us);
+                } else if (broken_bag_detected(now_us, weight)) {
+                    if (snapshot_.mode == OperationMode::Auto) {
+                        transition(State::RejectWait, now_us);
+                    } else {
+                        transition(State::Complete, now_us);
+                    }
                 } else if (weight.net_kg >= config_.coarse_to_fine_kg) {
                     transition(State::FineFill, now_us);
                 } else if (timed_out(now_us, config_.coarse_timeout_us)) {
@@ -347,6 +431,12 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                     fault(Fault::WeightFault, now_us);
                 } else if (!weight_fresh(now_us, weight)) {
                     fault(Fault::WeightStale, now_us);
+                } else if (broken_bag_detected(now_us, weight)) {
+                    if (snapshot_.mode == OperationMode::Auto) {
+                        transition(State::RejectWait, now_us);
+                    } else {
+                        transition(State::Complete, now_us);
+                    }
                 } else if (weight.net_kg >= cutoff_kg) {
                     transition(State::Cutoff, now_us);
                 } else if (timed_out(now_us, config_.fine_timeout_us)) {
@@ -367,11 +457,25 @@ ControllerSnapshot Controller::tick(std::uint64_t now_us,
                 } else if (now_us - snapshot_.state_enter_us >= config_.settle_min_us &&
                            weight.stable) {
                     if (snapshot_.mode == OperationMode::Manual) {
+                        snapshot_.disposition = BagDisposition::Good;
                         transition(State::Complete, now_us);
                     } else {
+                        snapshot_.disposition = BagDisposition::Good;
                         reset_discharge_capture(inputs);
                         transition(State::WaitDischarge, now_us);
                     }
+                }
+                break;
+
+            case State::RejectWait:
+                if (snapshot_.mode != OperationMode::Auto) {
+                    fault(Fault::ModeChanged, now_us);
+                } else if (snapshot_.disposition != BagDisposition::Reject) {
+                    fault(Fault::IoFault, now_us);
+                } else if (position.reject_window) {
+                    transition(State::Push, now_us);
+                } else if (timed_out(now_us, config_.reject_wait_timeout_us)) {
+                    fault(Fault::StateTimeout, now_us);
                 }
                 break;
 

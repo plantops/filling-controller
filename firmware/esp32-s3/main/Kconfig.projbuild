@@ -20,6 +20,32 @@ config SP01_CUTOFF_MARGIN_G
     range 0 5000
     default 0
 
+config SP01_BROKEN_BAG_LOSS_TRIP_G
+    int "Broken-bag net-weight loss trip (g; 0 disables)"
+    range 0 10000
+    default 0
+    help
+        Production value must come from measured G4/G8 TLB and machine traces.
+        Leave 0 until commissioning evidence freezes the detector threshold.
+
+config SP01_BROKEN_BAG_PERSIST_MS
+    int "Broken-bag loss persistence (ms; 0 disables)"
+    range 0 5000
+    default 0
+    help
+        Production value must come from measured G4/G8 evidence. The detector
+        is disabled unless loss trip, persistence and reject-wait timeout are
+        all non-zero.
+
+config SP01_REJECT_WAIT_TIMEOUT_MS
+    int "Reject-window wait timeout (ms; 0 disables detector)"
+    range 0 30000
+    default 0
+    help
+        Bounds REJECT_WAIT if the commissioned reject-position event is absent.
+        Production value must be frozen from G8 timing evidence. Do not enable
+        the broken-bag detector without a non-zero bounded timeout.
+
 config SP01_WEIGHT_STALE_MS
     int "Maximum weight age (ms)"
     range 20 5000
@@ -85,6 +111,15 @@ config SP01_TLB_ENABLE
     bool "Enable TLB485 polling"
     default y
 
+config SP01_DUMMY_WEIGHT_ENABLE
+    bool "Use dummy WeightSnapshot source (prototype shadow only)"
+    default n
+    help
+        Temporary field-prototype source when the TLB485 is not yet available.
+        It injects a simple 0 -> coarse -> fine -> target weight trajectory at
+        the WeightSnapshot boundary. While enabled, normal process outputs are
+        forced safe OFF. This does not replace G4/G5 real TLB/calibration work.
+
 config SP01_TLB_BAUD
     int "TLB485 baud"
     default 9600
@@ -137,5 +172,17 @@ config SP01_BENCH_DO_TEST_ENABLE
         Exposes a one-output-at-a-time, auto-off pulse command on the local HMI.
         This exists only for disconnected bench validation of DO1..DO8. Never
         use it with machine actuators, solenoids or contactors connected.
+
+config SP01_VIRTUAL_IO
+    bool "Enable virtual I/O with web UI (bench only)"
+    default n
+    help
+        Substitutes browser-driven virtual channels for physical DI and DO so
+        controller logic can be exercised with no dry contacts, lamps or 24 V
+        supply. While enabled, the TCA9554 is written to its safe latch once at
+        startup and never written again: a virtual DO drives no pin.
+
+        Bench and remote-development use only. Never enable on a node connected
+        to machine wiring.
 
 endmenu

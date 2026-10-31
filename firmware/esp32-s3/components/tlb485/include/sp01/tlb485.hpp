@@ -21,7 +21,18 @@ struct Tlb485Config {
 struct Tlb485Diagnostics {
     std::uint32_t polls_ok{0};
     std::uint32_t comm_errors{0};
+    std::uint32_t consecutive_errors{0};
     esp_err_t last_error{ESP_OK};
+
+    // G4/G7 transport evidence. Durations wrap one complete poll transaction;
+    // success intervals use the caller's monotonic now_us timestamp.
+    std::uint64_t last_success_us{0};
+    std::uint64_t poll_duration_last_us{0};
+    std::uint64_t poll_duration_max_us{0};
+    std::uint64_t success_interval_last_us{0};
+    std::uint64_t success_interval_min_us{0};
+    std::uint64_t success_interval_max_us{0};
+
     std::uint8_t unit_code{0xFF};
     std::uint8_t division_code{0xFF};
     std::uint8_t decimals{0};

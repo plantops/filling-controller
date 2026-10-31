@@ -21,6 +21,7 @@ enum class State : std::uint8_t {
     FineFill,
     Cutoff,
     Settle,
+    RejectWait,
     WaitDischarge,
     Push,
     Complete,
@@ -38,6 +39,12 @@ enum class Fault : std::uint8_t {
     IoFault,
     DischargeTimingInvalid,
     ModeChanged,
+};
+
+enum class BagDisposition : std::uint8_t {
+    Undecided,
+    Good,
+    Reject,
 };
 
 enum class Di : std::size_t {
@@ -86,16 +93,29 @@ struct WeightSnapshot {
     bool stable{false};
 };
 
+// Semantic rotor-position information. The hardware adapter that supplies this
+// signal is intentionally outside the controller core until G8 freezes the
+// as-built 210-degree reference/timing method.
+struct PositionSnapshot {
+    bool reject_window{false};
+};
+
 struct ControllerConfig {
     float target_kg{50.0F};
     float coarse_to_fine_kg{40.0F};
     float cutoff_margin_kg{0.0F};
+
+    // Broken-bag detector is disabled unless both values are > 0. G4/G8 must
+    // freeze production values from measured TLB/machine traces.
+    float broken_bag_loss_trip_kg{0.0F};
+    std::uint64_t broken_bag_persist_us{0};
 
     std::uint64_t weight_stale_us{500000};
     std::uint64_t bag_acquire_timeout_us{2000000};
     std::uint64_t coarse_timeout_us{12000000};
     std::uint64_t fine_timeout_us{5000000};
     std::uint64_t settle_min_us{200000};
+    std::uint64_t reject_wait_timeout_us{0};
     std::uint64_t wait_discharge_timeout_us{6000000};
     std::uint64_t push_duration_us{500000};
 
@@ -109,8 +129,12 @@ struct ControllerSnapshot {
     State state{State::WaitPermissive};
     Fault fault{Fault::None};
     OperationMode mode{OperationMode::Auto};
+    BagDisposition disposition{BagDisposition::Undecided};
     OutputImage outputs{};
     std::uint64_t state_enter_us{0};
+    std::uint64_t broken_bag_detected_us{0};
+    float broken_bag_peak_kg{0.0F};
+    float broken_bag_weight_kg{0.0F};
     std::uint64_t discharge_ref_interval_us{0};
     std::uint64_t discharge_due_us{0};
     std::uint32_t cycle_id{0};
@@ -152,5 +176,6 @@ constexpr bool manual_fill_requested(const InputImage& image) noexcept {
 const char* mode_name(OperationMode mode) noexcept;
 const char* state_name(State state) noexcept;
 const char* fault_name(Fault fault) noexcept;
+const char* disposition_name(BagDisposition disposition) noexcept;
 
 }  // namespace sp01
